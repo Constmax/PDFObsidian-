@@ -573,6 +573,14 @@ body {
     }
 }
 
+.pdf-plus-adding-text * {
+    cursor: text !important;
+
+    .textLayer {
+        user-select: none;
+    }
+}
+
 .pdf-container .pdf-plus-select-box {
     position: absolute;
     z-index: 1000;

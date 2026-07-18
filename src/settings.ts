@@ -153,6 +153,8 @@ export interface PDFPlusSettings {
 	renderMarkdownInStickyNote: boolean;
 	enablePDFEdit: boolean;
 	author: string;
+	freeTextFontSize: number;
+	freeTextColor: HexString;
 	writeHighlightToFileOpacity: number;
 	defaultWriteFileToggle: boolean;
 	syncWriteFileToggle: boolean;
@@ -428,6 +430,8 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	renderMarkdownInStickyNote: false,
 	enablePDFEdit: false,
 	author: '',
+	freeTextFontSize: 12,
+	freeTextColor: '#000000',
 	writeHighlightToFileOpacity: 0.2,
 	defaultWriteFileToggle: false,
 	syncWriteFileToggle: true,
@@ -1656,6 +1660,12 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					const inputEl = (setting.components[0] as TextComponent).inputEl;
 					inputEl.toggleClass('error', !inputEl.value);
 				});
+			this.addSliderSetting('freeTextFontSize', 6, 48, 1)
+				.setName('Text annotation: default font size')
+				.setDesc('The default font size used when adding text to PDF files via the "Add text to PDF" tool.');
+			this.addColorPickerSetting('freeTextColor')
+				.setName('Text annotation: default text color')
+				.setDesc('The default text color used when adding text to PDF files via the "Add text to PDF" tool.');
 			// this.addToggleSetting('enableEditEncryptedPDF')
 			// .setName('Enable editing encrypted PDF files');
 		}

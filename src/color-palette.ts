@@ -1,7 +1,8 @@
 import { Menu, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 
 import PDFPlus from 'main';
-import { KeysOfType, getEventCoords, isHexString, showMenuUnderParentEl, isTargetHTMLElement } from 'utils';
+import { PDFFreeTextModal } from 'modals';
+import { KeysOfType, getEventCoords, isHexString, showMenuUnderParentEl, isTargetHTMLElement, toPDFCoords } from 'utils';
 import { PDFViewerChild, Rect } from 'typings';
 import { PDFPlusComponent } from 'lib/component';
 
@@ -24,6 +25,7 @@ export class ColorPalette extends PDFPlusComponent {
     displayTextFormatMenuEl: HTMLElement | null;
     writeFileButtonEl: HTMLElement | null;
     cropButtonEl: HTMLElement | null;
+    freeTextButtonEl: HTMLElement | null;
     statusContainerEl: HTMLElement | null;
     statusEl: HTMLElement | null;
     importButtonEl: HTMLElement | null;
@@ -46,6 +48,7 @@ export class ColorPalette extends PDFPlusComponent {
         this.displayTextFormatMenuEl = null;
         this.writeFileButtonEl = null;
         this.cropButtonEl = null;
+        this.freeTextButtonEl = null;
         this.statusContainerEl = null;
         this.statusEl = null;
         this.importButtonEl = null;
@@ -79,6 +82,7 @@ export class ColorPalette extends PDFPlusComponent {
         this.displayTextFormatMenuEl = this.addDisplayTextFormatDropdown(this.paletteEl);
 
         this.addCropButton(this.paletteEl);
+        this.addFreeTextButton(this.paletteEl);
 
         if (this.child.isFileExternal) {
             this.addImportButton(this.paletteEl);
@@ -582,6 +586,100 @@ export class ColorPalette extends PDFPlusComponent {
                 this.registerDomEvent(viewerEl.doc, 'keydown', onKeyDown);
             } else {
                 viewerEl.removeEventListener('pointerdown', onPointerDown);
+                viewerEl.doc.removeEventListener('keydown', onKeyDown);
+            }
+        };
+
+        toggle();
+    }
+
+    addFreeTextButton(paletteEl: HTMLElement) {
+        this.freeTextButtonEl = paletteEl.createDiv('clickable-icon pdf-plus-free-text', (el) => {
+            setIcon(el, 'lucide-type');
+            setTooltip(el, 'Add text to PDF (writes a text annotation into the file)');
+            el.toggleClass('is-disabled', !this.lib.isEditable(this.child));
+
+            let shown = false;
+            el.addEventListener('click', () => {
+                if (!this.lib.isEditable(this.child)) {
+                    if (shown) return;
+
+                    const menu = new Menu()
+                        .addItem((item) => {
+                            item.setIcon('lucide-settings')
+                                .setTitle('Enable PDF editing...')
+                                .onClick(() => {
+                                    this.plugin.openSettingTab()
+                                        .scrollToHeading('edit');
+                                });
+                        });
+                    menu.onHide(() => {
+                        shown = false;
+                    });
+
+                    showMenuUnderParentEl(menu, el);
+                    shown = true;
+                    return;
+                }
+
+                this.startFreeTextPlacement();
+            });
+        });
+    }
+
+    startFreeTextPlacement() {
+        const freeTextButtonEl = this.freeTextButtonEl;
+        if (!freeTextButtonEl) return;
+        if (!this.lib.isEditable(this.child)) return;
+
+        const child = this.child;
+        if (!child.pdfViewer.dom?.viewerEl) return;
+
+        const viewerEl = child.pdfViewer.dom.viewerEl;
+
+        const onPointerUp = (evt: PointerEvent | TouchEvent) => {
+            // Determine the target page based on the event target
+            if (!(isTargetHTMLElement(evt, evt.target))) return;
+
+            const pageEl = evt.target.closest<HTMLElement>('div.page[data-page-number]');
+            if (!pageEl || !pageEl.dataset.pageNumber) return;
+
+            const pageNumber = +pageEl.dataset.pageNumber;
+            const pageView = child.getPage(pageNumber);
+
+            // Convert the click position into PDF user space coordinates
+            const { x, y } = getEventCoords(evt);
+            const [pdfPoint] = [...toPDFCoords(pageView, [{ x, y }])];
+            if (isNaN(pdfPoint[0]) || isNaN(pdfPoint[1])) return;
+
+            toggle();
+
+            if (child.file) {
+                new PDFFreeTextModal(this.plugin, child, child.file, pageNumber, pdfPoint[0], pdfPoint[1]).open();
+            }
+        };
+
+        const onKeyDown = (evt: KeyboardEvent) => {
+            if (evt.key === 'Escape') {
+                toggle();
+            }
+        };
+
+        const toggle = () => {
+            freeTextButtonEl.toggleClass('is-active', !freeTextButtonEl.hasClass('is-active'));
+            viewerEl.toggleClass('pdf-plus-adding-text', freeTextButtonEl.hasClass('is-active'));
+            this.register(() => viewerEl.removeClass('pdf-plus-adding-text'));
+
+            activeWindow.getSelection()?.empty();
+
+            if (freeTextButtonEl.hasClass('is-active')) {
+                // `viewerEl` is not a part of this component, so just `viewerEl.addEventListener` & `viewerEl.removeEventListener`is not enough.
+                // We have to explicitly remove the event listeners not just when the placement is done, but also
+                // when this component gets unloaded.
+                this.registerDomEvent(viewerEl, 'pointerup', onPointerUp);
+                this.registerDomEvent(viewerEl.doc, 'keydown', onKeyDown);
+            } else {
+                viewerEl.removeEventListener('pointerup', onPointerUp);
                 viewerEl.doc.removeEventListener('keydown', onKeyDown);
             }
         };

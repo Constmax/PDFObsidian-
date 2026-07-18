@@ -30,7 +30,8 @@ type PDFAnnotationDict = {
 export class PDFAnnotationEditModal extends PDFAnnotationModal {
     static readonly supportedSubtypes = [
         'Highlight', 'Underline', 'Squiggly', 'StrikeOut', // text markup annotations
-        'Link'
+        'Link',
+        'FreeText'
     ] as const;
 
     supportedKeys: Partial<Array<keyof PDFAnnotationDict>>;
@@ -51,9 +52,18 @@ export class PDFAnnotationEditModal extends PDFAnnotationModal {
     static forSubtype(subtype: typeof PDFAnnotationEditModal.supportedSubtypes[number], ...args: ConstructorParameters<typeof PDFAnnotationModal>): PDFAnnotationEditModal {
         if (subtype === 'Link') {
             return PDFAnnotationEditModal.forLinkAnnotation(...args);
+        } else if (subtype === 'FreeText') {
+            return PDFAnnotationEditModal.forFreeTextAnnotation(...args);
         } else {
             return PDFAnnotationEditModal.forTextMarkupAnnotation(...args);
         }
+    }
+
+    static forFreeTextAnnotation(...args: ConstructorParameters<typeof PDFAnnotationModal>): PDFAnnotationEditModal {
+        return new PDFAnnotationEditModal(
+            { author: false, contents: true },
+            ...args
+        );
     }
 
     static forTextMarkupAnnotation(...args: ConstructorParameters<typeof PDFAnnotationModal>): PDFAnnotationEditModal {
@@ -175,8 +185,11 @@ export class PDFAnnotationEditModal extends PDFAnnotationModal {
         }
 
         if (writers.length) {
-            await pdflibAPI.processAnnotation(this.file, this.page, this.id, async (annot) => {
+            await pdflibAPI.processAnnotation(this.file, this.page, this.id, async (annot, pdfDoc, pdfPage) => {
                 writers.forEach((writer) => writer(annot));
+                // Keep the appearance stream of free text annotations in sync with the new contents
+                // (no-op for other annotation types)
+                await pdflibAPI.refreshFreeTextAppearance(pdfDoc, pdfPage, annot);
             });
         }
     }

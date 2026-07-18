@@ -28,6 +28,10 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
                 id: 'rectangular-selection',
                 name: 'Start rectangular selection',
                 checkCallback: (checking) => this.copyEmbedLinkToRectangularSelection(checking, false)
+            }, {
+                id: 'add-text',
+                name: 'Add text to PDF (write a text annotation into the file)',
+                checkCallback: (checking) => this.addFreeTextToPDF(checking)
             },
             // {
             //     id: 'create-canvas-card-from-selection',
@@ -322,6 +326,18 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
         const colorName = palette.selectedColorName ?? undefined;
 
         return this.lib.copyLink.writeHighlightAnnotationToSelectionIntoFileAndCopyLink(checking, { copyFormat: template }, colorName, autoPaste);
+    }
+
+    addFreeTextToPDF(checking: boolean) {
+        const palette = this.lib.getColorPalette();
+        if (!palette || !palette.freeTextButtonEl) return false;
+        if (!this.lib.isEditable(palette.child)) return false;
+
+        if (!checking) {
+            palette.startFreeTextPlacement();
+        }
+
+        return true;
     }
 
     copyEmbedLinkToRectangularSelection(checking: boolean, autoPaste: boolean) {

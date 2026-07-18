@@ -82,6 +82,17 @@ export class AnnotationWriteFileLib extends PDFPlusLibSubmodule {
         }
     }
 
+    /**
+     * Adds a free text annotation (i.e. a text box directly shown on the page) to the given position.
+     *
+     * @param x The x-coordinate of the on-screen top-left corner of the text box in PDF user space.
+     * @param y The y-coordinate of the on-screen top-left corner of the text box in PDF user space.
+     */
+    async addFreeTextAnnotationAt(file: TFile, pageNumber: number, x: number, y: number, contents: string, options?: { fontSize?: number, colorHex?: string }) {
+        const io = this.getPdfIo();
+        return await io.addFreeTextAnnotation(file, pageNumber, { x, y }, contents, options);
+    }
+
     async deleteAnnotation(file: TFile, pageNumber: number, id: string) {
         const io = this.getPdfIo();
         await io.deleteAnnotation(file, pageNumber, id);
@@ -107,6 +118,12 @@ export interface IPdfIo {
     addHighlightAnnotation(file: TFile, pageNumber: number, rects: Rect[], colorName?: string, contents?: string): Promise<string>;
     addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: Rect[], subtype: 'Highlight' | 'Underline' | 'Squiggly' | 'StrikeOut', colorName?: string, contents?: string): Promise<string>
     addLinkAnnotation(file: TFile, pageNumber: number, rects: Rect[], dest: DestArray | string, colorName?: string, contents?: string): Promise<string>;
+    /**
+     * @param pageNumber A 1-based page number.
+     * @param pos The on-screen top-left corner of the text box in PDF user space coordinates.
+     * @returns A promise resolving to the ID of the newly created annotation.
+     */
+    addFreeTextAnnotation(file: TFile, pageNumber: number, pos: { x: number, y: number }, contents: string, options?: { fontSize?: number, colorHex?: string }): Promise<string>;
     deleteAnnotation(file: TFile, pageNumber: number, id: string): Promise<void>;
     getAnnotationContents(file: TFile, pageNumber: number, id: string): Promise<string | null>;
     setAnnotationContents(file: TFile, pageNumber: number, id: string, contents: string): Promise<void>;
