@@ -73,33 +73,7 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
      * at most once. Drafts are written even if `fn` returns `null`.
      */
     async modify(file: TFile, fn: (data: ArrayBuffer) => ArrayBuffer | null | Promise<ArrayBuffer | null>): Promise<void> {
-        await this.exclusive(file.path, async () => {
-            for (let attempt = 1; ; attempt++) {
-                const before = await this.stat(file);
-                let data = await this.app.vault.readBinary(file);
-
-                const sources = this.draftSourcesFor(file);
-                for (const source of sources) {
-                    data = await source.applyDrafts(data);
-                }
-
-                const result = await fn(data);
-                const out = result ?? (sources.length ? data : null);
-                if (!out) return;
-
-                // Optimistic check: if a third party wrote the file while we were working on it,
-                // start over from its new content instead of overwriting it.
-                const now = await this.stat(file);
-                if (!sameStamp(before, now)) {
-                    if (attempt >= PDFWriteCoordinator.MAX_ATTEMPTS) throw this.conflict(file);
-                    continue;
-                }
-
-                await this.write(file, out);
-                for (const source of sources) source.onDraftsWritten();
-                return;
-            }
-        });
+        await this.exclusive(file.path, () => this.modifyUnlocked(file, fn));
     }
 
     /** Load `file` with pdf-lib, let `fn` modify it, and save it back — all under exclusive access. */
@@ -121,26 +95,36 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
     /**
      * For writers that restructure the document (e.g. insert or remove pages), onto whose result
      * drafts cannot be rebased: write pending drafts first, so that they move along with their pages,
-     * then read the file. Pass the returned stamp to `overwrite()`.
+     * then let `fn` compute the new content from the current one. All of this happens under
+     * exclusive access, so other writes of this plugin can't get in between.
+     *
+     * Unlike `modify()`, `fn` is called only once: if a third party wrote the file in the meantime,
+     * a `PDFWriteConflictError` is thrown and nothing is written.
      */
-    async readForRewrite(file: TFile): Promise<{ data: ArrayBuffer, stamp: FileStamp | null }> {
-        await this.flush(file);
-        return await this.exclusive(file.path, async () => {
-            const stamp = await this.stat(file);
-            const data = await this.app.vault.readBinary(file);
-            return { data, stamp };
+    async rewrite(file: TFile, fn: (data: ArrayBuffer) => ArrayBuffer | null | Promise<ArrayBuffer | null>): Promise<void> {
+        await this.exclusive(file.path, async () => {
+            await this.modifyUnlocked(file, () => null);
+
+            const before = await this.stat(file);
+            const out = await fn(await this.app.vault.readBinary(file));
+            if (!out) return;
+
+            if (!sameStamp(before, await this.stat(file))) throw this.conflict(file);
+            await this.replace(file, out);
         });
     }
 
-    /**
-     * Replace the whole content of `file`, waiting for other writes to finish first. Drafts are not merged.
-     * If `expected` is given (from `readForRewrite()`), nothing is written when the file changed since then.
-     */
-    async overwrite(file: TFile, data: ArrayBuffer, expected?: FileStamp | null): Promise<void> {
-        await this.exclusive(file.path, async () => {
-            if (expected !== undefined && !sameStamp(expected, await this.stat(file))) throw this.conflict(file);
-            await this.write(file, data);
+    /** Read `file` after writing pending drafts, for when its content is only used elsewhere (e.g. copied to another file). */
+    async readFlushed(file: TFile): Promise<ArrayBuffer> {
+        return await this.exclusive(file.path, async () => {
+            await this.modifyUnlocked(file, () => null);
+            return await this.app.vault.readBinary(file);
         });
+    }
+
+    /** Replace the whole content of `file`, waiting for other writes to finish first. */
+    async overwrite(file: TFile, data: ArrayBuffer): Promise<void> {
+        await this.exclusive(file.path, () => this.replace(file, data));
     }
 
     /** Whether the last modify event for `file` stems from a write of this coordinator. */
@@ -169,6 +153,7 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
             this.queues.delete(oldPath);
             this.queues.set(file.path, queue);
         }
+        if (this.writing.delete(oldPath)) this.writing.add(file.path);
     }
 
     private conflict(file: TFile) {
@@ -181,12 +166,63 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
         return [...this.sources].filter((source) => source.path === file.path && source.hasDrafts());
     }
 
+    /** Must be called under exclusive access to `file`. */
+    private async modifyUnlocked(file: TFile, fn: (data: ArrayBuffer) => ArrayBuffer | null | Promise<ArrayBuffer | null>): Promise<void> {
+        for (let attempt = 1; ; attempt++) {
+            const before = await this.stat(file);
+            let data = await this.app.vault.readBinary(file);
+
+            const sources = this.draftSourcesFor(file);
+            for (const source of sources) {
+                data = await source.applyDrafts(data);
+            }
+
+            const result = await fn(data);
+            const out = result ?? (sources.length ? data : null);
+            if (!out) return;
+
+            // Optimistic check: if a third party wrote the file while we were working on it,
+            // start over from its new content instead of overwriting it.
+            const now = await this.stat(file);
+            if (!sameStamp(before, now)) {
+                if (attempt >= PDFWriteCoordinator.MAX_ATTEMPTS) throw this.conflict(file);
+                continue;
+            }
+
+            await this.write(file, out);
+            for (const source of sources) source.onDraftsWritten();
+            return;
+        }
+    }
+
+    /**
+     * Write `data` as the new content of `file` without merging drafts into it. Must be called under exclusive access.
+     *
+     * The write reloads the viewers, and since it is our own, draft sources are not warned as for a
+     * foreign modification. So capture their drafts before writing and merge them into the new content afterwards.
+     */
+    private async replace(file: TFile, data: ArrayBuffer) {
+        const hadDrafts = this.draftSourcesFor(file).length > 0;
+        await this.write(file, data);
+        if (hadDrafts) {
+            try {
+                await this.modifyUnlocked(file, () => null);
+            } catch (err) {
+                // The drafts stay with their sources and are written with the next change.
+                console.error(err);
+            }
+        }
+    }
+
     private async write(file: TFile, data: ArrayBuffer) {
-        this.writing.add(file.path);
+        const path = file.path;
+        this.writing.add(path);
         try {
             await this.app.vault.modifyBinary(file, data);
             this.ownStamps.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
         } finally {
+            // The file may have been renamed during the write, in which case onRename() moved the entry.
+            this.writing.delete(path);
             this.writing.delete(file.path);
         }
     }
@@ -204,7 +240,10 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
         const tail = current.then(() => { }, () => { });
         this.queues.set(path, tail);
         tail.then(() => {
-            if (this.queues.get(path) === tail) this.queues.delete(path);
+            // Look the entry up by identity: onRename() may have moved it to another path.
+            for (const [key, queue] of this.queues) {
+                if (queue === tail) this.queues.delete(key);
+            }
         });
         return current;
     }

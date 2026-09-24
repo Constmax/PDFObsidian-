@@ -20,12 +20,14 @@ export class PDFViewerDrafts implements PDFDraftSource {
     private generations = new WeakMap<PDFDocumentProxy, number>();
     private nextGeneration = 0;
     /**
-     * Documents whose editors have been written. The viewer reloads the file asynchronously
-     * after a write; until then, the old document must not be captured again, or a write
-     * queued right behind would add its editors a second time.
+     * Serialized data of the drafts written from the current document, by key. The viewer reloads
+     * the file asynchronously after a write; until then, the old document still holds these editors,
+     * and they must not be captured again, or a write queued right behind would add them a second time.
+     * Editors that were created or changed after being captured for a write are not in here and are kept.
      */
-    private written = new WeakSet<PDFDocumentProxy>();
-    private lastCaptured: PDFDocumentProxy | null = null;
+    private written = new Map<string, string>();
+    /** The drafts merged by the last `applyDrafts()`, which `onDraftsWritten()` confirms. */
+    private applying: Draft[] = [];
     /** `child.file` is briefly null while the viewer reloads — exactly when drafts need their file most. */
     private lastPath = '';
     private unregister: () => void;
@@ -47,7 +49,8 @@ export class PDFViewerDrafts implements PDFDraftSource {
     }
 
     async applyDrafts(data: ArrayBuffer): Promise<ArrayBuffer> {
-        const result = await applyDrafts(this.lib, data, [...this.drafts.values()]);
+        this.applying = [...this.drafts.values()];
+        const result = await applyDrafts(this.lib, data, this.applying);
         if (result.report.rescuedAsNew) {
             new Notice(`${this.lib.plugin.manifest.name}: ${result.report.rescuedAsNew} edited annotation(s) had been changed or removed by someone else. Your version was saved as a new annotation.`, 10000);
         }
@@ -55,8 +58,14 @@ export class PDFViewerDrafts implements PDFDraftSource {
     }
 
     onDraftsWritten() {
-        this.drafts.clear();
-        if (this.lastCaptured) this.written.add(this.lastCaptured);
+        for (const draft of this.applying) {
+            const json = JSON.stringify(draft.data);
+            this.written.set(draft.key, json);
+            // A draft edited further while the write was in progress still needs to be written.
+            const current = this.drafts.get(draft.key);
+            if (current && JSON.stringify(current.data) === json) this.drafts.delete(draft.key);
+        }
+        this.applying = [];
     }
 
     onForeignModify() {
@@ -89,8 +98,7 @@ export class PDFViewerDrafts implements PDFDraftSource {
     private capture() {
         const pdfViewer = this.child.pdfViewer?.pdfViewer;
         const doc = pdfViewer?.pdfDocument;
-        if (!doc || this.written.has(doc)) return;
-        this.lastCaptured = doc;
+        if (!doc) return;
 
         // pdf.js adds an editor to the annotation storage only when it is committed, so a text box
         // being typed into isn't there yet. Commit it; this also serializes its current text.
@@ -101,6 +109,8 @@ export class PDFViewerDrafts implements PDFDraftSource {
         if (generation === undefined) {
             generation = this.nextGeneration++;
             this.generations.set(doc, generation);
+            // A new document means the one whose written editors had to be skipped is gone.
+            this.written.clear();
         }
         // The worker only picks up storage keys starting with EDITOR_KEY_PREFIX as new annotations.
         const prefix = `${EDITOR_KEY_PREFIX}g${generation}_`;
@@ -113,6 +123,11 @@ export class PDFViewerDrafts implements PDFDraftSource {
 
             const data: SerializedEditor | null = value.serialize(false);
             if (!data) continue; // empty, or unchanged since loaded
+
+            // Already written and unchanged since: the file has it; the viewer just hasn't reloaded yet.
+            // (If it was changed after all, it is written again as a new annotation. That duplicates it,
+            // but the other option is losing the change.)
+            if (this.written.get(prefix + key) === JSON.stringify(data)) continue;
 
             this.drafts.set(prefix + key, { key: prefix + key, data, base: data.id !== null ? baseOf(value) : null });
         }

@@ -5,7 +5,7 @@ import { PDFPlusLibSubmodule } from './submodule';
 import { range, encodeLinktext } from 'utils';
 import { PDFPageLabels } from './page-labels';
 import { PDFOutlines } from './outlines';
-import { FileStamp, toArrayBuffer } from './pdf-write-coordinator';
+import { toArrayBuffer } from './pdf-write-coordinator';
 
 
 /**
@@ -107,18 +107,27 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
         this.pageLabelUpdater = new PageLabelUpdater(this.plugin);
     }
 
-    /** Where each document returned by `read()` came from, so that `write()` can detect intermediate changes. */
-    private origins = new WeakMap<PDFDocument, { path: string, stamp: FileStamp | null }>();
-
     /**
      * The operations here restructure documents (insert, remove, move pages), so pending drafts
      * can't be rebased onto their results. They are written before reading instead.
      */
     async read(file: TFile): Promise<PDFDocument> {
-        const { data, stamp } = await this.lib.writer.readForRewrite(file);
-        const doc = await this.lib.loadPdfLibDocumentFromArrayBuffer(data);
-        this.origins.set(doc, { path: file.path, stamp });
-        return doc;
+        return await this.lib.loadPdfLibDocumentFromArrayBuffer(await this.lib.writer.readFlushed(file));
+    }
+
+    /**
+     * Load `file`, let `fn` modify the document and write it back, with exclusive access to the file throughout.
+     * `fn` may return `false` to leave the file unchanged, in which case `null` is returned.
+     */
+    async rewrite(file: TFile, fn: (doc: PDFDocument, data: ArrayBuffer) => Promise<boolean | void> | boolean | void): Promise<TFile | null> {
+        let changed = false;
+        await this.lib.writer.rewrite(file, async (data) => {
+            const doc = await this.lib.loadPdfLibDocumentFromArrayBuffer(data);
+            if (await fn(doc, data) === false) return null;
+            changed = true;
+            return toArrayBuffer(await doc.save());
+        });
+        return changed ? file : null;
     }
 
     /** Write the content of `pdfDoc` into the specified file. If the file does not exist, it will be created. */
@@ -130,9 +139,7 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
             if (!existOk) {
                 new Notice(`${this.plugin.manifest.name}: File already exists: ${path}`);
             }
-            const origin = this.origins.get(pdfDoc);
-            // Refuse to write if pdfDoc was read from this very file and the file has changed since.
-            await this.lib.writer.overwrite(file, toArrayBuffer(buffer), origin?.path === path ? origin.stamp : undefined);
+            await this.lib.writer.overwrite(file, toArrayBuffer(buffer));
             return file;
         } else if (file === null) {
             const folderPath = normalizePath(path.split('/').slice(0, -1).join('/'));
@@ -147,11 +154,11 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
     }
 
     async addPage(file: TFile) {
-        const doc = await this.read(file);
-        const lastPage = doc.getPage(doc.getPageCount() - 1);
-        const { width, height } = lastPage.getSize();
-        doc.addPage([width, height]);
-        return await this.write(file.path, doc, true);
+        return await this.rewrite(file, (doc) => {
+            const lastPage = doc.getPage(doc.getPageCount() - 1);
+            const { width, height } = lastPage.getSize();
+            doc.addPage([width, height]);
+        });
     }
 
     /**
@@ -161,47 +168,41 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
      * @param keepLabels Whether to keep the page labels unchanged.
      */
     async insertPage(file: TFile, pageNumber: number, basePageNumber: number, keepLabels: boolean) {
-        const doc = await this.read(file);
+        return await this.rewrite(file, (doc) => {
+            this.pageLabelUpdater.insertPage(doc, pageNumber, keepLabels);
 
-        this.pageLabelUpdater.insertPage(doc, pageNumber, keepLabels);
+            const basePage = doc.getPage(basePageNumber - 1);
+            const { width, height } = basePage.getSize();
 
-        const basePage = doc.getPage(basePageNumber - 1);
-        const { width, height } = basePage.getSize();
-
-        doc.insertPage(pageNumber - 1, [width, height]);
-
-        return await this.write(file.path, doc, true);
+            doc.insertPage(pageNumber - 1, [width, height]);
+        });
     }
 
     async removePage(file: TFile, pageNumber: number, keepLabels: boolean) {
-        const doc = await this.read(file);
+        return await this.rewrite(file, async (doc) => {
+            this.pageLabelUpdater.removePage(doc, pageNumber, keepLabels);
+            doc.removePage(pageNumber - 1);
 
-        this.pageLabelUpdater.removePage(doc, pageNumber, keepLabels);
-        doc.removePage(pageNumber - 1);
-
-        const outlines = await PDFOutlines.fromDocument(doc, this.plugin);
-        await outlines.prune();
-
-        return await this.write(file.path, doc, true);
+            const outlines = await PDFOutlines.fromDocument(doc, this.plugin);
+            await outlines.prune();
+        });
     }
 
     /** Merge file2 into file1 by appending all pages from file2 to file1. */
     async mergeFiles(file1: TFile, file2: TFile, keepLabels: boolean): Promise<TFile | null> {
-        const [doc1, doc2] = await Promise.all([
-            this.read(file1),
-            this.read(file2)
-        ]);
+        // Read file2 before locking file1, so that no lock is ever held while waiting for another one.
+        const doc2 = await this.read(file2);
 
-        // TODO: implement this
-        this.pageLabelUpdater.mergeFiles(doc1, doc2, keepLabels);
+        const resultFile = await this.rewrite(file1, async (doc1) => {
+            // TODO: implement this
+            this.pageLabelUpdater.mergeFiles(doc1, doc2, keepLabels);
 
-        const pagesToAdd = await doc1.copyPages(doc2, doc2.getPageIndices());
+            const pagesToAdd = await doc1.copyPages(doc2, doc2.getPageIndices());
 
-        for (const page of pagesToAdd) doc1.addPage(page);
+            for (const page of pagesToAdd) doc1.addPage(page);
 
-        // TODO: update outlines
-
-        const resultFile = await this.write(file1.path, doc1, true);
+            // TODO: update outlines
+        });
         if (resultFile === null) return null;
 
         await this.app.fileManager.trashFile(file2);
@@ -220,41 +221,44 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
     }
 
     async extractPagesInPlace(srcFile: TFile, pages: number[], dstPath: string, existOk: boolean, keepLabels: boolean) {
-        // Create two different copies of the source file
-        const [srcDoc, dstDoc] = await Promise.all([
-            this.read(srcFile),
-            this.read(srcFile)
-        ]);
+        if (normalizePath(dstPath) === srcFile.path) throw new Error('Cannot extract pages into the source file itself');
 
-        // Get the pages to keep in the source file (pages not in the `pages` array)
-        const srcPages = [];
-        for (let page = 1; page <= srcDoc.getPageCount(); page++) {
-            if (!pages.includes(page)) srcPages.push(page);
-        }
+        let dstFile = null as TFile | null;
 
-        // Update page labels before actually removing pages
-        this.pageLabelUpdater.removePages(srcDoc, pages, keepLabels);
-        this.pageLabelUpdater.removePages(dstDoc, srcPages, keepLabels);
+        await this.rewrite(srcFile, async (srcDoc, data) => {
+            // Create a second copy of the source file
+            const dstDoc = await this.lib.loadPdfLibDocumentFromArrayBuffer(data);
 
-        // From the last page to the first page, so that the page numbers don't change
-        for (let page = srcDoc.getPageCount(); page >= 1; page--) {
-            if (pages.includes(page)) srcDoc.removePage(page - 1);
-            else dstDoc.removePage(page - 1);
-        }
+            // Get the pages to keep in the source file (pages not in the `pages` array)
+            const srcPages = [];
+            for (let page = 1; page <= srcDoc.getPageCount(); page++) {
+                if (!pages.includes(page)) srcPages.push(page);
+            }
 
-        await Promise.all(
-            [srcDoc, dstDoc]
-                .map(async (doc) => {
-                    const outlines = await PDFOutlines.fromDocument(doc, this.plugin);
-                    await outlines.prune();
-                })
-        );
+            // Update page labels before actually removing pages
+            this.pageLabelUpdater.removePages(srcDoc, pages, keepLabels);
+            this.pageLabelUpdater.removePages(dstDoc, srcPages, keepLabels);
 
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const [_, dstFile] = await Promise.all([
-            this.write(srcFile.path, srcDoc, true),
-            this.write(dstPath, dstDoc, existOk)
-        ]);
+            // From the last page to the first page, so that the page numbers don't change
+            for (let page = srcDoc.getPageCount(); page >= 1; page--) {
+                if (pages.includes(page)) srcDoc.removePage(page - 1);
+                else dstDoc.removePage(page - 1);
+            }
+
+            await Promise.all(
+                [srcDoc, dstDoc]
+                    .map(async (doc) => {
+                        const outlines = await PDFOutlines.fromDocument(doc, this.plugin);
+                        await outlines.prune();
+                    })
+            );
+
+            // Write the extracted pages first: if that fails, the source file is left untouched
+            // instead of losing the pages. (This waits for the lock of the destination while
+            // holding that of the source; dstPath is not the source itself, as checked above.)
+            dstFile = await this.write(dstPath, dstDoc, existOk);
+            if (!dstFile) return false;
+        });
 
         return dstFile;
     }
