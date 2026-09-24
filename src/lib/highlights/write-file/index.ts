@@ -73,7 +73,7 @@ export class AnnotationWriteFileLib extends PDFPlusLibSubmodule {
                     try {
                         annotationID = await annotator(child.file, pageNumber, rects);
                     } catch (e) {
-                        new Notice(`${this.plugin.manifest.name}: An error occurred while attemping to add an annotation.`);
+                        new Notice(`${this.plugin.manifest.name}: An error occurred while attempting to add an annotation: ${e instanceof Error ? e.message : e}`);
                         console.error(e);
                     }
                     return { annotationID, rects };

@@ -166,6 +166,10 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
                 name: 'Add to outline (bookmark)',
                 checkCallback: (checking) => this.addOutlineItem(checking)
             }, {
+                id: 'toggle-textbox-tool',
+                name: 'Toggle text box tool',
+                checkCallback: (checking) => this.toggleTextboxTool(checking)
+            }, {
                 id: 'create-new-note',
                 name: 'Create new note for auto-focus or auto-paste',
                 callback: () => this.createNewNote()
@@ -817,6 +821,14 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
             })();
         }
 
+        return true;
+    }
+
+    toggleTextboxTool(checking: boolean) {
+        const child = this.lib.getPDFViewerChild(true);
+        const tool = child?.textbox;
+        if (!child || !tool || !this.lib.isEditable(child)) return false;
+        if (!checking) tool.toggle();
         return true;
     }
 

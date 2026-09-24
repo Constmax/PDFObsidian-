@@ -3,6 +3,7 @@ import { Menu, Platform, setIcon, setTooltip } from 'obsidian';
 import PDFPlus from 'main';
 import { PDFPlusComponent } from 'lib/component';
 import { ColorPalette } from 'color-palette';
+import { TextboxTool } from 'lib/textbox/tool';
 import { PDFToolbar, PDFViewerChild } from 'typings';
 import { showChildElOnParentElHover, showMenuUnderParentEl } from 'utils';
 import { ScrollMode, SpreadMode } from 'pdfjs-enums';
@@ -22,6 +23,7 @@ export class PDFPlusToolbar extends PDFPlusComponent {
 
     onload() {
         this.addColorPalette();
+        this.addTextboxButton();
         this.replaceDisplayOptionsDropdown();
         this.addZoomLevelInputEl();
         this.makeDropdownInToolbarHoverable();
@@ -35,6 +37,47 @@ export class PDFPlusToolbar extends PDFPlusComponent {
         this.child.palette = this.addChild(
             new ColorPalette(this.plugin, this.child, this.toolbar.toolbarLeftEl)
         );
+    }
+
+    addTextboxButton() {
+        const { toolbarLeftEl } = this.toolbar;
+        // Toolbars are rebuilt on 'update-dom' without unloading the previous instance.
+        toolbarLeftEl.querySelectorAll(`.${TextboxTool.BUTTON_CLS}, .${TextboxTool.FONT_SIZE_CLS}`).forEach((el) => el.remove());
+
+        if (!this.lib.isEditable(this.child)) return;
+
+        const buttonEl = toolbarLeftEl.createDiv(`clickable-icon ${TextboxTool.BUTTON_CLS}`, (el) => {
+            setIcon(el, 'lucide-type');
+            setTooltip(el, 'Add text box');
+            el.toggleClass('is-active', !!this.child.textbox?.active);
+            el.addEventListener('click', () => this.child.textbox?.toggle());
+        });
+        this.register(() => buttonEl.remove());
+
+        const fontSizeEl = createDiv(`clickable-icon ${TextboxTool.FONT_SIZE_CLS}`, (el) => {
+            setTooltip(el, 'Font size');
+            el.createSpan({ cls: 'pdf-plus-textbox-font-size-value', text: String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize) });
+            setIcon(el.createSpan(), 'lucide-chevron-down');
+            el.toggle(!!this.child.textbox?.active);
+            // Keep the focus in the text box being typed into.
+            el.addEventListener('mousedown', (evt) => evt.preventDefault());
+            el.addEventListener('click', () => {
+                const tool = this.child.textbox;
+                if (!tool) return;
+                tool.rememberActiveEditor();
+                const menu = new Menu();
+                for (const size of TextboxTool.FONT_SIZES) {
+                    menu.addItem((item) => {
+                        item.setTitle(String(size))
+                            .setChecked(size === tool.fontSize)
+                            .onClick(() => tool.setFontSize(size));
+                    });
+                }
+                showMenuUnderParentEl(menu, el);
+            });
+        });
+        buttonEl.after(fontSizeEl);
+        this.register(() => fontSizeEl.remove());
     }
 
     makeDropdownInToolbarHoverable() {
