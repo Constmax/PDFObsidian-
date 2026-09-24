@@ -5,6 +5,7 @@ import { PDFPlusLibSubmodule } from './submodule';
 import { range, encodeLinktext } from 'utils';
 import { PDFPageLabels } from './page-labels';
 import { PDFOutlines } from './outlines';
+import { FileStamp, toArrayBuffer } from './pdf-write-coordinator';
 
 
 /**
@@ -106,8 +107,18 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
         this.pageLabelUpdater = new PageLabelUpdater(this.plugin);
     }
 
+    /** Where each document returned by `read()` came from, so that `write()` can detect intermediate changes. */
+    private origins = new WeakMap<PDFDocument, { path: string, stamp: FileStamp | null }>();
+
+    /**
+     * The operations here restructure documents (insert, remove, move pages), so pending drafts
+     * can't be rebased onto their results. They are written before reading instead.
+     */
     async read(file: TFile): Promise<PDFDocument> {
-        return await this.lib.loadPdfLibDocument(file);
+        const { data, stamp } = await this.lib.writer.readForRewrite(file);
+        const doc = await this.lib.loadPdfLibDocumentFromArrayBuffer(data);
+        this.origins.set(doc, { path: file.path, stamp });
+        return doc;
     }
 
     /** Write the content of `pdfDoc` into the specified file. If the file does not exist, it will be created. */
@@ -119,7 +130,9 @@ export class PDFFileOperator extends PDFPlusLibSubmodule {
             if (!existOk) {
                 new Notice(`${this.plugin.manifest.name}: File already exists: ${path}`);
             }
-            await this.app.vault.modifyBinary(file, buffer);
+            const origin = this.origins.get(pdfDoc);
+            // Refuse to write if pdfDoc was read from this very file and the file has changed since.
+            await this.lib.writer.overwrite(file, toArrayBuffer(buffer), origin?.path === path ? origin.stamp : undefined);
             return file;
         } else if (file === null) {
             const folderPath = normalizePath(path.split('/').slice(0, -1).join('/'));

@@ -1,0 +1,220 @@
+import { Notice, TFile } from 'obsidian';
+import { PDFDocument } from '@cantoo/pdf-lib';
+
+import { PDFPlusLibSubmodule } from './submodule';
+
+
+/**
+ * Something that holds unsaved changes to a PDF outside of the file, e.g. text boxes
+ * typed into pdf.js' annotation editor layer but not saved yet.
+ *
+ * Any write to the file reloads every viewer showing it, which discards such changes.
+ * A registered draft source therefore gets its drafts merged into every write that
+ * goes through the coordinator, so that they end up in the file instead of being lost.
+ */
+export interface PDFDraftSource {
+    /** Path of the PDF file this source holds drafts for. Read on every write, so it may change on rename. */
+    readonly path: string;
+    hasDrafts(): boolean;
+    /**
+     * Merge the drafts into `data` (the current content of the file) and return the result.
+     * Must not write anything by itself.
+     */
+    applyDrafts(data: ArrayBuffer): Promise<ArrayBuffer>;
+    /** Called once the data returned by `applyDrafts` has been written successfully. */
+    onDraftsWritten(): void;
+    /**
+     * Called synchronously when the file was modified by someone other than this coordinator
+     * (a sync plugin, another app, ...). The viewers are about to reload; this is the last
+     * chance to capture drafts from the old document.
+     */
+    onForeignModify?(): void;
+}
+
+export class PDFWriteConflictError extends Error {
+    constructor(path: string) {
+        super(`${path} was modified by someone else in the meantime. Nothing was written.`);
+        this.name = 'PDFWriteConflictError';
+    }
+}
+
+export type FileStamp = { mtime: number, size: number };
+
+/**
+ * Serializes all writes to a PDF file and makes every writer work on the current content of the file.
+ *
+ * Without this, each writer reads the file, modifies it and writes the whole file back.
+ * When two of these overlap, or when a writer works on an old copy (like pdf.js' `saveDocument()`,
+ * which is based on the bytes loaded when the viewer opened the file), the last one to write
+ * silently discards the changes of the others.
+ */
+export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
+    /** Maximum number of attempts when the file is modified by a third party during a write. */
+    static MAX_ATTEMPTS = 3;
+
+    private queues = new Map<string, Promise<unknown>>();
+    private sources = new Set<PDFDraftSource>();
+    /** Stamp of the file right after our last write, used to tell our own modify events from foreign ones. */
+    private ownStamps = new Map<string, FileStamp>();
+    /** Paths currently being written by us. The modify event may fire before `modifyBinary` resolves. */
+    private writing = new Set<string>();
+
+    /** Returns a function that unregisters the source. */
+    registerDraftSource(source: PDFDraftSource): () => void {
+        this.sources.add(source);
+        return () => this.sources.delete(source);
+    }
+
+    /**
+     * Read-modify-write `file` with exclusive access.
+     *
+     * `fn` receives the current content of the file, with pending drafts already merged in,
+     * and returns the new content, or `null` if it has nothing to change. The file is written
+     * at most once. Drafts are written even if `fn` returns `null`.
+     */
+    async modify(file: TFile, fn: (data: ArrayBuffer) => ArrayBuffer | null | Promise<ArrayBuffer | null>): Promise<void> {
+        await this.exclusive(file.path, async () => {
+            for (let attempt = 1; ; attempt++) {
+                const before = await this.stat(file);
+                let data = await this.app.vault.readBinary(file);
+
+                const sources = this.draftSourcesFor(file);
+                for (const source of sources) {
+                    data = await source.applyDrafts(data);
+                }
+
+                const result = await fn(data);
+                const out = result ?? (sources.length ? data : null);
+                if (!out) return;
+
+                // Optimistic check: if a third party wrote the file while we were working on it,
+                // start over from its new content instead of overwriting it.
+                const now = await this.stat(file);
+                if (!sameStamp(before, now)) {
+                    if (attempt >= PDFWriteCoordinator.MAX_ATTEMPTS) throw this.conflict(file);
+                    continue;
+                }
+
+                await this.write(file, out);
+                for (const source of sources) source.onDraftsWritten();
+                return;
+            }
+        });
+    }
+
+    /** Load `file` with pdf-lib, let `fn` modify it, and save it back — all under exclusive access. */
+    async modifyWithPdfLib<T>(file: TFile, fn: (doc: PDFDocument) => T | Promise<T>): Promise<T> {
+        let ret!: T;
+        await this.modify(file, async (data) => {
+            const doc = await this.lib.loadPdfLibDocumentFromArrayBuffer(data);
+            ret = await fn(doc);
+            return toArrayBuffer(await doc.save());
+        });
+        return ret;
+    }
+
+    /** Write pending drafts for `file`, if there are any. */
+    async flush(file: TFile): Promise<void> {
+        await this.modify(file, () => null);
+    }
+
+    /**
+     * For writers that restructure the document (e.g. insert or remove pages), onto whose result
+     * drafts cannot be rebased: write pending drafts first, so that they move along with their pages,
+     * then read the file. Pass the returned stamp to `overwrite()`.
+     */
+    async readForRewrite(file: TFile): Promise<{ data: ArrayBuffer, stamp: FileStamp | null }> {
+        await this.flush(file);
+        return await this.exclusive(file.path, async () => {
+            const stamp = await this.stat(file);
+            const data = await this.app.vault.readBinary(file);
+            return { data, stamp };
+        });
+    }
+
+    /**
+     * Replace the whole content of `file`, waiting for other writes to finish first. Drafts are not merged.
+     * If `expected` is given (from `readForRewrite()`), nothing is written when the file changed since then.
+     */
+    async overwrite(file: TFile, data: ArrayBuffer, expected?: FileStamp | null): Promise<void> {
+        await this.exclusive(file.path, async () => {
+            if (expected !== undefined && !sameStamp(expected, await this.stat(file))) throw this.conflict(file);
+            await this.write(file, data);
+        });
+    }
+
+    /** Whether the last modify event for `file` stems from a write of this coordinator. */
+    isOwnWrite(file: TFile): boolean {
+        if (this.writing.has(file.path)) return true;
+        const stamp = this.ownStamps.get(file.path);
+        return !!stamp && sameStamp(stamp, file.stat);
+    }
+
+    /** To be called on every `modify` event of the vault. */
+    onVaultModify(file: TFile) {
+        if (file.extension !== 'pdf' || this.isOwnWrite(file)) return;
+        for (const source of this.sources) {
+            if (source.path === file.path) source.onForeignModify?.();
+        }
+    }
+
+    onRename(file: TFile, oldPath: string) {
+        const stamp = this.ownStamps.get(oldPath);
+        if (stamp) {
+            this.ownStamps.delete(oldPath);
+            this.ownStamps.set(file.path, stamp);
+        }
+        const queue = this.queues.get(oldPath);
+        if (queue) {
+            this.queues.delete(oldPath);
+            this.queues.set(file.path, queue);
+        }
+    }
+
+    private conflict(file: TFile) {
+        const error = new PDFWriteConflictError(file.path);
+        new Notice(`${this.plugin.manifest.name}: ${error.message}`, 8000);
+        return error;
+    }
+
+    private draftSourcesFor(file: TFile) {
+        return [...this.sources].filter((source) => source.path === file.path && source.hasDrafts());
+    }
+
+    private async write(file: TFile, data: ArrayBuffer) {
+        this.writing.add(file.path);
+        try {
+            await this.app.vault.modifyBinary(file, data);
+            this.ownStamps.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+        } finally {
+            this.writing.delete(file.path);
+        }
+    }
+
+    /** Stamp straight from the disk. `file.stat` lags behind until Obsidian's file watcher catches up. */
+    private async stat(file: TFile): Promise<FileStamp | null> {
+        const stat = await this.app.vault.adapter.stat(file.path);
+        return stat ? { mtime: stat.mtime, size: stat.size } : null;
+    }
+
+    /** Run `task` after all previously scheduled tasks for `path` have settled. */
+    private exclusive<T>(path: string, task: () => Promise<T>): Promise<T> {
+        const previous = this.queues.get(path) ?? Promise.resolve();
+        const current = previous.then(task, task);
+        const tail = current.then(() => { }, () => { });
+        this.queues.set(path, tail);
+        tail.then(() => {
+            if (this.queues.get(path) === tail) this.queues.delete(path);
+        });
+        return current;
+    }
+}
+
+function sameStamp(a: FileStamp | null, b: FileStamp | null) {
+    return !!a && !!b && a.mtime === b.mtime && a.size === b.size;
+}
+
+/** pdf-lib and pdf.js return Uint8Arrays that may be views into larger buffers. */
+export function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}

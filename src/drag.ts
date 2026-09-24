@@ -50,8 +50,7 @@ export const registerOutlineDrag = async (plugin: PDFPlus, pdfOutlineViewer: PDF
                     && draggedItem.parent !== item
                     && item.owner === draggedItem.owner) {
                     if (!dragging) {
-                        (async () => {
-                            const outlines = await PDFOutlines.fromFile(file, plugin);
+                        PDFOutlines.modify(file, plugin, async (outlines) => {
                             const [destItem, itemToMove] = await Promise.all([
                                 outlines.findPDFjsOutlineTreeNode(item),
                                 outlines.findPDFjsOutlineTreeNode(draggedItem)
@@ -59,14 +58,12 @@ export const registerOutlineDrag = async (plugin: PDFPlus, pdfOutlineViewer: PDF
 
                             if (!destItem || !itemToMove) {
                                 new Notice(`${plugin.manifest.name}: Failed to move the outline item.`);
-                                return;
+                                return false;
                             }
 
                             destItem.appendChild(itemToMove);
-                            destItem.sortChildren();
-                            const buffer = await outlines.doc.save();
-                            await app.vault.modifyBinary(file, buffer);
-                        })();
+                            await destItem.sortChildren();
+                        });
                     }
 
                     return {
@@ -94,21 +91,18 @@ export const registerOutlineDrag = async (plugin: PDFPlus, pdfOutlineViewer: PDF
 
         if (draggedItem && draggedItem.parent && pdfOutlineViewer === draggedItem.owner) {
             if (!dragging) {
-                (async () => {
-                    const outlines = await PDFOutlines.fromFile(file, plugin);
-                    const itemToMove = await outlines?.findPDFjsOutlineTreeNode(draggedItem);
+                PDFOutlines.modify(file, plugin, async (outlines) => {
+                    const itemToMove = await outlines.findPDFjsOutlineTreeNode(draggedItem);
 
                     if (!itemToMove) {
                         new Notice(`${plugin.manifest.name}: Failed to move the outline item.`);
-                        return;
+                        return false;
                     }
 
                     const root = outlines.ensureRoot();
                     root.appendChild(itemToMove);
-                    root.sortChildren();
-                    const buffer = await outlines.doc.save();
-                    await app.vault.modifyBinary(file, buffer);
-                })();
+                    await root.sortChildren();
+                });
             }
 
             return {

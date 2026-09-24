@@ -81,12 +81,7 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
     }
 
     async process<T>(file: TFile, fn: (pdfDoc: PDFDocument) => T) {
-        const pdfDoc = await this.lib.loadPdfLibDocument(file);
-
-        const ret = await fn(pdfDoc);
-
-        await this.app.vault.modifyBinary(file, await pdfDoc.save());
-        return ret;
+        return await this.lib.writer.modifyWithPdfLib(file, fn);
     }
 
     async read<T>(file: TFile, fn: (pdfDoc: PDFDocument) => T) {

@@ -406,7 +406,7 @@ export class ColorPalette extends PDFPlusComponent {
         const res = await fetch(url);
         if (res.ok) {
             const buffer = await res.arrayBuffer();
-            await this.app.vault.modifyBinary(file, buffer);
+            await this.lib.writer.overwrite(file, buffer);
 
             this.removeImportButton();
             if (this.paletteEl) {

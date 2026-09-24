@@ -292,10 +292,13 @@ export class PDFPageLabelEditModal extends PDFPageLabelModal {
                         .setCta()
                         .onClick(async () => {
                             if (this.pageLabels && this.doc) {
-                                if (this.pageLabels.rangeCount() > 0) {
-                                    this.pageLabels.setToDocument(this.doc);
-                                } else PDFPageLabels.removeFromDocument(this.doc);
-                                await this.app.vault.modifyBinary(this.file, await this.doc.save());
+                                const pageLabels = this.pageLabels;
+                                // this.doc was loaded when the modal opened; apply the labels to the current content instead.
+                                await this.plugin.lib.writer.modifyWithPdfLib(this.file, (doc) => {
+                                    if (pageLabels.rangeCount() > 0) {
+                                        pageLabels.setToDocument(doc);
+                                    } else PDFPageLabels.removeFromDocument(doc);
+                                });
                             } else {
                                 new Notice(`${this.plugin.manifest.name}: Something went wrong.`);
                             }
