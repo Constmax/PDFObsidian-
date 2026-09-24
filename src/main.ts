@@ -741,6 +741,14 @@ export default class PDFPlus extends Plugin {
 			}
 		}));
 
+		// Tell holders of unsaved PDF changes when someone else wrote the file
+		this.registerEvent(this.app.vault.on('modify', (file) => {
+			if (file instanceof TFile) this.lib.writer.onVaultModify(file);
+		}));
+		this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+			if (file instanceof TFile) this.lib.writer.onRename(file, oldPath);
+		}));
+
 		// Keep the vimrc content up-to-date
 		this.registerEvent(this.app.vault.on('modify', async (file) => {
 			if (file instanceof TFile && file.path === this.settings.vimrcPath) {

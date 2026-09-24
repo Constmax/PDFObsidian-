@@ -5,6 +5,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFStrin
 import PDFPlus from 'main';
 import { DestArray, PDFOutlineTreeNode } from 'typings';
 import { PDFNamedDestinations } from './destinations';
+import { toArrayBuffer } from './pdf-write-coordinator';
 
 
 export class PDFOutlines {
@@ -160,33 +161,51 @@ export class PDFOutlines {
     }
 
     static async processOutlineRoot(process: (root: PDFOutlineItem) => void, file: TFile, plugin: PDFPlus) {
-        const { app } = plugin;
-
-        const outlines = await PDFOutlines.fromFile(file, plugin);
-
-        process(outlines.ensureRoot());
-
-        // Save the modified PDF document
-        const buffer = await outlines.doc.save();
-        await app.vault.modifyBinary(file, buffer);
+        await plugin.lib.writer.modifyWithPdfLib(file, (doc) => {
+            process(new PDFOutlines(plugin, doc).ensureRoot());
+        });
     }
 
     static async findAndProcessOutlineItem(item: PDFOutlineTreeNode, processor: (item: PDFOutlineItem) => void, file: TFile, plugin: PDFPlus) {
-        const { app } = plugin;
+        await PDFOutlines.modify(file, plugin, async (outlines) => {
+            const found = await outlines.findPDFjsOutlineTreeNode(item);
 
-        const outlines = await PDFOutlines.fromFile(file, plugin);
-        const found = await outlines.findPDFjsOutlineTreeNode(item);
+            if (!found) {
+                new Notice(`${plugin.manifest.name}: Failed to process the outline item.`);
+                return false;
+            }
 
-        if (!found) {
-            new Notice(`${plugin.manifest.name}: Failed to process the outline item.`);
-            return;
+            processor(found);
+        });
+    }
+
+    /**
+     * Modify the outlines of `file` based on its current content, under exclusive access.
+     * `fn` may return `false` to leave the file unchanged.
+     */
+    static async modify(file: TFile, plugin: PDFPlus, fn: (outlines: PDFOutlines) => Promise<boolean | void> | boolean | void) {
+        const { lib } = plugin;
+        await lib.writer.modify(file, async (data) => {
+            const outlines = new PDFOutlines(plugin, await lib.loadPdfLibDocumentFromArrayBuffer(data));
+            if (await fn(outlines) === false) return null;
+            return toArrayBuffer(await outlines.doc.save());
+        });
+    }
+
+    /**
+     * The item at the same position in the tree and with the same title as `item`, which may
+     * belong to an older copy of the document. Object numbers can't be used for this, since
+     * rewriting the file may renumber objects.
+     */
+    findCounterpart(item: PDFOutlineItem): PDFOutlineItem | null {
+        if (item.isRoot()) return this.root;
+        let current = this.root;
+        for (const index of item.path) {
+            let child = current?.firstChild ?? null;
+            for (let i = 0; i < index && child; i++) child = child.nextSibling;
+            current = child;
         }
-
-        processor(found);
-
-        // Save the modified PDF document
-        const buffer = await outlines.doc.save();
-        await app.vault.modifyBinary(file, buffer);
+        return current && !current.isRoot() && current.title === item.title ? current : null;
     }
 }
 
@@ -330,6 +349,17 @@ export class PDFOutlineItem {
             if (!ancestor.isRoot()) name = `${ancestor.title}/${name}`;
         });
         return name;
+    }
+
+    /** Index among its siblings for each level below the root. The root's path is empty. */
+    get path(): number[] {
+        const path: number[] = [];
+        for (let item: PDFOutlineItem | null = this; item && !item.isRoot(); item = item.parent) {
+            let index = 0;
+            for (let sibling = item.prevSibling; sibling; sibling = sibling.prevSibling) index++;
+            path.unshift(index);
+        }
+        return path;
     }
 
     get depth(): number {

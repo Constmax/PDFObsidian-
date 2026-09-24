@@ -836,18 +836,15 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
             new PDFOutlineTitleModal(this.plugin, 'Add to outline')
                 .ask()
                 .then(async ({ title }) => {
-                    const outlines = await PDFOutlines.fromFile(file, this.plugin);
-                    const doc = outlines.doc;
-
-                    outlines
-                        .ensureRoot()
-                        .createChild(title, destArray)
-                        .updateCountForAllAncestors();
-                    outlines
-                        .ensureRoot()
-                        .sortChildren();
-
-                    await this.app.vault.modifyBinary(file, await doc.save());
+                    await PDFOutlines.modify(file, this.plugin, async (outlines) => {
+                        outlines
+                            .ensureRoot()
+                            .createChild(title, destArray)
+                            .updateCountForAllAncestors();
+                        await outlines
+                            .ensureRoot()
+                            .sortChildren();
+                    });
                 });
         }
 

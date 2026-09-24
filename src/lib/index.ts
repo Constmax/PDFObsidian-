@@ -21,6 +21,8 @@ import { PDFBacklinkIndex } from './pdf-backlink-index';
 import { Speech } from './speech';
 import * as utils from 'utils';
 import { DummyFileManager } from './dummy-file-manager';
+import { PDFWriteCoordinator } from './pdf-write-coordinator';
+import { PDFViewerDrafts } from './textbox/drafts';
 import { RenderParameters } from 'pdfjs-dist/types/src/display/api';
 
 
@@ -51,6 +53,8 @@ export class PDFPlusLib {
     composer: PDFComposer;
     dummyFileManager: DummyFileManager;
     speech: Speech;
+    /** All writes to PDF files should go through this. */
+    writer: PDFWriteCoordinator;
 
     utils = utils;
 
@@ -63,6 +67,9 @@ export class PDFPlusLib {
     PDFNamedDestinations = PDFNamedDestinations;
     PDFPageLabels = PDFPageLabels;
 
+    /** Unsaved pdf.js annotation editors of a viewer, merged into every write to its file */
+    PDFViewerDrafts = PDFViewerDrafts;
+
     constructor(plugin: PDFPlus) {
         this.app = plugin.app;
         this.plugin = plugin;
@@ -74,6 +81,7 @@ export class PDFPlusLib {
         this.composer = new PDFComposer(plugin);
         this.dummyFileManager = new DummyFileManager(plugin);
         this.speech = new Speech(plugin);
+        this.writer = new PDFWriteCoordinator(plugin);
     }
 
     /** 
@@ -1078,6 +1086,8 @@ export class PDFPlusLib {
             }
             if (typeof data === 'string') {
                 await this.app.vault.modify(file, data);
+            } else if (file.extension === 'pdf') {
+                await this.writer.overwrite(file, data);
             } else {
                 await this.app.vault.modifyBinary(file, data);
             }

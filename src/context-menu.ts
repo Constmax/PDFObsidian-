@@ -175,7 +175,7 @@ export const onThumbnailContextMenu = (plugin: PDFPlus, child: PDFViewerChild, e
 
 // TODO: split into smaller methods
 export const onOutlineItemContextMenu = (plugin: PDFPlus, child: PDFViewerChild, file: TFile, item: PDFOutlineTreeNode, evt: MouseEvent) => {
-    const { app, lib } = plugin;
+    const { lib } = plugin;
 
     if (child.pdfViewer.isEmbed) evt.preventDefault();
 
@@ -263,10 +263,17 @@ export const onOutlineItemContextMenu = (plugin: PDFPlus, child: PDFViewerChild,
                         new PDFOutlineMoveModal(outlines, itemToMove)
                             .askDestination()
                             .then(async (destItem) => {
-                                destItem.appendChild(itemToMove);
-                                destItem.sortChildren();
-                                const buffer = await outlines.doc.save();
-                                await app.vault.modifyBinary(file, buffer);
+                                // The file may have changed while the modal was open: move on its current content.
+                                await PDFOutlines.modify(file, plugin, async (current) => {
+                                    const dest = current.findCounterpart(destItem);
+                                    const moved = await current.findPDFjsOutlineTreeNode(item);
+                                    if (!dest || !moved) {
+                                        new Notice(`${plugin.manifest.name}: The outline changed in the meantime. Please try again.`);
+                                        return false;
+                                    }
+                                    dest.appendChild(moved);
+                                    await dest.sortChildren();
+                                });
                             });
                     });
             })
