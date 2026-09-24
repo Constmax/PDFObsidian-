@@ -11,7 +11,7 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
 
     async addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: Rect[], subtype: TextMarkupAnnotationSubtype, colorName?: string, contents?: string) {
         if (!this.plugin.settings.author) {
-            throw new Error(`${this.plugin.manifest.name}: The author name is not set. Please set it in the plugin settings.`);
+            throw new Error('The annotation author is not set. Please set it in the plugin settings.');
         }
 
         return await this.process(file, (pdfDoc) => {
