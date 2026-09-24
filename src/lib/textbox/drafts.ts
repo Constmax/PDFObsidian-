@@ -1,4 +1,4 @@
-import { Notice } from 'obsidian';
+import { Notice, TFile } from 'obsidian';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 
 import { PDFPlusLib } from 'lib';
@@ -42,8 +42,7 @@ export class PDFViewerDrafts implements PDFDraftSource {
     }
 
     hasDrafts(): boolean {
-        this.capture();
-        return this.drafts.size > 0;
+        return this.pending > 0;
     }
 
     async applyDrafts(data: ArrayBuffer): Promise<ArrayBuffer> {
@@ -61,21 +60,36 @@ export class PDFViewerDrafts implements PDFDraftSource {
 
     onForeignModify() {
         // The viewer is about to reload the file and destroy the current document.
-        this.capture();
-        const file = this.child.file;
-        if (!this.drafts.size || !file) return;
+        const count = this.pending;
+        if (!count) return;
 
-        const count = this.drafts.size;
-        const kept = () => new Notice(`${this.lib.plugin.manifest.name}: ${file.name} was modified elsewhere. ${count} unsaved annotation(s) are kept and will be saved with the next change to this file.`, 10000);
-        this.lib.writer.flush(file)
+        const name = this.path.split('/').pop();
+        const kept = () => new Notice(`${this.lib.plugin.manifest.name}: ${name} was modified elsewhere. ${count} unsaved annotation(s) are kept and will be saved with the next change to this file.`, 10000);
+        this.save()
             .then(() => {
                 if (this.drafts.size) kept();
-                else new Notice(`${this.lib.plugin.manifest.name}: ${file.name} was modified elsewhere. ${count} unsaved annotation(s) were merged into the new version and saved.`, 8000);
+                else new Notice(`${this.lib.plugin.manifest.name}: ${name} was modified elsewhere. ${count} unsaved annotation(s) were merged into the new version and saved.`, 8000);
             })
             .catch((err) => {
                 console.error(err);
                 kept();
             });
+    }
+
+    /**
+     * Number of unsaved drafts. Captures synchronously, so this is also the way to secure drafts
+     * right before the viewer destroys its document (on close or reload).
+     */
+    get pending(): number {
+        this.capture();
+        return this.drafts.size;
+    }
+
+    /** Write all drafts to the file. Drafts that could not be written stay pending. */
+    async save(): Promise<void> {
+        if (!this.pending) return;
+        const file = this.lib.app.vault.getAbstractFileByPath(this.path);
+        if (file instanceof TFile) await this.lib.writer.flush(file);
     }
 
     dispose() {
@@ -95,7 +109,7 @@ export class PDFViewerDrafts implements PDFDraftSource {
         // pdf.js adds an editor to the annotation storage only when it is committed, so a text box
         // being typed into isn't there yet. Commit it; this also serializes its current text.
         const active = (pdfViewer as any)._layerProperties?.annotationEditorUIManager?.getActive();
-        if (active?.isInEditMode() && active.parent) active.commit();
+        if (active?.isInEditMode() && active.parent) active.commitOrRemove(); // empty ones can't be committed
 
         let generation = this.generations.get(doc);
         if (generation === undefined) {

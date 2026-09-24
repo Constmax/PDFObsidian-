@@ -14,6 +14,7 @@ import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
 import { ColorPalette } from 'color-palette';
 import { ScrollMode, SidebarView, SpreadMode } from 'pdfjs-enums';
 import { BibliographyManager } from 'bib';
+import { TextboxTool } from 'lib/textbox/tool';
 import { VimBindings } from 'vim/vim';
 
 
@@ -180,6 +181,7 @@ interface PDFViewerChild {
     /** `annotationHighlight`'s counterpart for rectangle selections. */
     rectHighlight: HTMLElement | null;
     bib: BibliographyManager | null;
+    textbox: TextboxTool | null;
 }
 
 interface PDFHighlight {
