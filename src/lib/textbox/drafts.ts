@@ -134,13 +134,18 @@ export class PDFViewerDrafts implements PDFDraftSource {
     }
 }
 
+/** `AnnotationEditorType`s in pdf.js; they equal the corresponding `AnnotationType`s. */
+const HIGHLIGHT = 9;
+const INK = 15;
+
 /** The annotation an editor was created from. pdf.js keeps it as `_initialData`. */
 function baseOf(editor: any): DraftBase | null {
     const initial = editor._initialData;
     if (!initial || typeof initial.id !== 'string') return null;
     return {
         id: initial.id,
-        annotationType: initial.annotationType,
+        // A free highlight is an ink annotation in the file, but its editor records it as a highlight.
+        annotationType: initial.annotationType === HIGHLIGHT && initial.inkLists ? INK : initial.annotationType,
         pageIndex: initial.pageIndex,
         rect: Array.from(initial.rect),
         value: initial.value,
