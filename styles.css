@@ -787,3 +787,19 @@ body.pdf-plus-vim-hint-inverted {
 .annotationEditorLayer .freeTextEditor[data-editor-rotation="270"] {
     transform: rotate(270deg);
 }
+
+.pdf-plus-textbox-font-size {
+    gap: var(--size-2-1);
+    font-size: var(--font-ui-small);
+    font-variant-numeric: tabular-nums;
+
+    .pdf-plus-textbox-font-size-value {
+        min-width: 2ch;
+        text-align: right;
+    }
+
+    svg {
+        width: var(--icon-xs);
+        height: var(--icon-xs);
+    }
+}

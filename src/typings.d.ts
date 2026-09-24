@@ -615,6 +615,8 @@ interface PDFJsEventMap {
     scalechanged: { value: string, source?: any };
     scalechanging: { source: PDFViewer, scale: number, presetValue?: number };
     documentinit: { source: ObsidianViewer };
+    annotationeditorparamschanged: { source: any, details: [type: number, value: unknown][] };
+    annotationeditorstateschanged: { source: any, details: { hasSelectedEditor?: boolean } };
 }
 
 interface PDFEmbed extends Embed {

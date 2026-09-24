@@ -10,6 +10,9 @@ import { PDFViewerDrafts } from './drafts';
 const EDITOR_MODE_NONE = 0;
 const EDITOR_MODE_FREETEXT = 3;
 
+/** Value of pdf.js' `AnnotationEditorParamsType.FREETEXT_SIZE`. */
+const PARAM_FREETEXT_SIZE = 11;
+
 /** How long to wait for pdf.js to switch the editor mode. */
 const MODE_SWITCH_TIMEOUT_MS = 2000;
 
@@ -17,6 +20,13 @@ const MODE_SWITCH_TIMEOUT_MS = 2000;
 interface EditorLayer {
     div: HTMLElement;
     createAndAddNewEditor(point: { offsetX: number, offsetY: number }, isCentered: boolean): TextEditor | null;
+}
+
+interface UIManager {
+    hasSelection: boolean;
+    firstSelectedEditor: TextEditor | undefined;
+    getActive(): TextEditor | null;
+    updateParams(type: number, value: unknown): void;
 }
 
 interface TextEditor {
@@ -45,12 +55,20 @@ interface TextEditor {
  */
 export class TextboxTool extends PDFPlusComponent {
     static BUTTON_CLS = 'pdf-plus-textbox-button';
+    static FONT_SIZE_CLS = 'pdf-plus-textbox-font-size';
+    static FONT_SIZES = [6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+    /** Font size of new text boxes, shared by all viewers like pdf.js' own default. */
+    static defaultFontSize = 10;
 
     child: PDFViewerChild;
     drafts: PDFViewerDrafts;
     active = false;
+    /** Font size of the selected text box, or of new ones if none is selected. */
+    fontSize = TextboxTool.defaultFontSize;
     /** Whether the current pointer gesture started inside a text box. */
     private gestureInTextbox = false;
+    /** The text box that was being typed into when a toolbar menu was opened. */
+    private lastActiveEditor: TextEditor | null = null;
 
     constructor(plugin: PDFPlus, child: PDFViewerChild) {
         super(plugin);
@@ -71,6 +89,18 @@ export class TextboxTool extends PDFPlusComponent {
                 this.deactivate();
             }
         });
+
+        const eventBus = this.child.pdfViewer?.eventBus;
+        if (eventBus) {
+            // Dispatched when a text box is selected, with its properties.
+            this.lib.registerPDFEvent('annotationeditorparamschanged', eventBus, this, ({ details }) => {
+                const size = details.find(([type]) => type === PARAM_FREETEXT_SIZE)?.[1];
+                if (typeof size === 'number') this.showFontSize(size);
+            });
+            this.lib.registerPDFEvent('annotationeditorstateschanged', eventBus, this, ({ details }) => {
+                if (details.hasSelectedEditor === false) this.showFontSize(TextboxTool.defaultFontSize);
+            });
+        }
     }
 
     onunload() {
@@ -87,6 +117,10 @@ export class TextboxTool extends PDFPlusComponent {
 
     get pdfViewer(): any {
         return this.child.pdfViewer?.pdfViewer;
+    }
+
+    private get uiManager(): UIManager | null {
+        return this.pdfViewer?._layerProperties?.annotationEditorUIManager ?? null;
     }
 
     async toggle() {
@@ -113,8 +147,52 @@ export class TextboxTool extends PDFPlusComponent {
             return false;
         }
 
+        // pdf.js' default is global, but may have been reset by a new pdf.js instance.
+        const uiManager = this.uiManager;
+        if (uiManager && !uiManager.hasSelection) uiManager.updateParams(PARAM_FREETEXT_SIZE, TextboxTool.defaultFontSize);
+        this.showFontSize(TextboxTool.defaultFontSize);
+
         this.setActive(true);
         return true;
+    }
+
+    /**
+     * Set the font size of the selected text boxes and of new ones. The text box being typed
+     * into stays in edit mode.
+     */
+    setFontSize(size: number) {
+        const uiManager = this.uiManager;
+        if (!uiManager) return;
+
+        // Opening the menu moved the focus out of the text box, which ended its edit mode.
+        const editing = this.lastActiveEditor;
+        this.lastActiveEditor = null;
+
+        // Changes the selected text boxes, or pdf.js' default if none is selected.
+        uiManager.updateParams(PARAM_FREETEXT_SIZE, size);
+        const selected = uiManager.firstSelectedEditor;
+        if (selected) {
+            (selected.constructor as unknown as { updateDefaultParams(type: number, value: unknown): void })
+                .updateDefaultParams(PARAM_FREETEXT_SIZE, size);
+        }
+        TextboxTool.defaultFontSize = size;
+        this.showFontSize(size);
+
+        if (editing?.parent && !editing.isInEditMode()) {
+            editing.enableEditMode();
+            editing.editorDiv?.focus();
+        }
+    }
+
+    /** Remember the text box being typed into before a toolbar menu takes the focus. */
+    rememberActiveEditor() {
+        this.lastActiveEditor = this.activeEditor();
+    }
+
+    private showFontSize(size: number) {
+        this.fontSize = size;
+        const el = this.child.toolbar?.toolbarLeftEl.querySelector('.' + TextboxTool.FONT_SIZE_CLS + ' .pdf-plus-textbox-font-size-value');
+        if (el) el.textContent = String(size);
     }
 
     /** Turn the tool off and save the text boxes. */
@@ -142,6 +220,7 @@ export class TextboxTool extends PDFPlusComponent {
         this.active = active;
         this.child.containerEl.toggleClass('pdf-plus-textbox-active', active);
         this.child.toolbar?.toolbarLeftEl.querySelector('.' + TextboxTool.BUTTON_CLS)?.toggleClass('is-active', active);
+        this.child.toolbar?.toolbarLeftEl.querySelector<HTMLElement>('.' + TextboxTool.FONT_SIZE_CLS)?.toggle(active);
     }
 
     private async waitForMode(mode: number) {
@@ -160,7 +239,7 @@ export class TextboxTool extends PDFPlusComponent {
 
     /** The editor being typed into, if any. */
     private activeEditor(): TextEditor | null {
-        const editor = this.pdfViewer?._layerProperties?.annotationEditorUIManager?.getActive();
+        const editor = this.uiManager?.getActive();
         return editor?.isInEditMode() ? editor : null;
     }
 
