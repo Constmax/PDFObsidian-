@@ -4,7 +4,7 @@ import { PDFDocumentProxy } from 'pdfjs-dist';
 import { PDFPlusLib } from 'lib';
 import { PDFDraftSource } from 'lib/pdf-write-coordinator';
 import { PDFViewerChild } from 'typings';
-import { Draft, DraftBase, EDITOR_KEY_PREFIX, SerializedEditor, applyDrafts } from './rebase';
+import { AnnotationStyle, Draft, DraftBase, EDITOR_KEY_PREFIX, STYLE_KEYS, SerializedEditor, applyDrafts, normalizeColor } from './rebase';
 
 
 /**
@@ -134,15 +134,31 @@ export class PDFViewerDrafts implements PDFDraftSource {
     }
 }
 
+/** `AnnotationEditorType`s in pdf.js; they equal the corresponding `AnnotationType`s. */
+const HIGHLIGHT = 9;
+const INK = 15;
+
 /** The annotation an editor was created from. pdf.js keeps it as `_initialData`. */
 function baseOf(editor: any): DraftBase | null {
     const initial = editor._initialData;
     if (!initial || typeof initial.id !== 'string') return null;
     return {
         id: initial.id,
-        annotationType: initial.annotationType,
+        // A free highlight is an ink annotation in the file, but its editor records it as a highlight.
+        annotationType: initial.annotationType === HIGHLIGHT && initial.inkLists ? INK : initial.annotationType,
         pageIndex: initial.pageIndex,
         rect: Array.from(initial.rect),
         value: initial.value,
+        style: styleOf(initial),
     };
+}
+
+/** The formatting properties `_initialData` has. Which ones depends on the editor type. */
+function styleOf(initial: any): AnnotationStyle {
+    const style: AnnotationStyle = {};
+    for (const key of STYLE_KEYS) {
+        if (initial[key] === undefined) continue;
+        (style as any)[key] = key === 'color' ? normalizeColor(initial.color) : initial[key];
+    }
+    return style;
 }
