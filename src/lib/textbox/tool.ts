@@ -4,6 +4,7 @@ import PDFPlus from 'main';
 import { PDFPlusComponent } from 'lib/component';
 import { PDFViewerChild } from 'typings';
 import { PDFViewerDrafts } from './drafts';
+import { patchTextboxResizing } from './resize';
 
 
 /** Values of pdf.js' `AnnotationEditorType` used here. */
@@ -77,6 +78,8 @@ export class TextboxTool extends PDFPlusComponent {
     }
 
     onload() {
+        patchTextboxResizing(this.plugin);
+
         // Capture phase: runs before pdf.js' handlers and before the event reaches the text layer.
         this.registerDomEvent(this.child.containerEl, 'pointerdown', (evt) => {
             const target = evt.target as HTMLElement | null;

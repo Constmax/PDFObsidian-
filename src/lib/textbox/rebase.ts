@@ -111,7 +111,9 @@ export async function applyDrafts(lib: PDFPlusLib, data: ArrayBuffer, drafts: Dr
 function findAnnotation(annots: any[], base: DraftBase): any | undefined {
     const matches = (annot: any) => annot.annotationType === base.annotationType
         && rectsClose(annot.rect, base.rect)
-        && (base.value === undefined || (annot.textContent ?? []).join('\n') === base.value);
+        // Ignoring whitespace: text boxes with a fixed width have fewer line breaks as editors
+        // than their appearance stream (`textContent`) shows (see resize.ts).
+        && (base.value === undefined || stripWhitespace((annot.textContent ?? []).join('')) === stripWhitespace(base.value));
 
     return annots.find((annot) => annot.id === base.id && matches(annot))
         ?? annots.find(matches);
@@ -119,4 +121,8 @@ function findAnnotation(annots: any[], base: DraftBase): any | undefined {
 
 function rectsClose(a: number[] | undefined, b: number[]) {
     return !!a && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= RECT_TOLERANCE);
+}
+
+function stripWhitespace(text: string) {
+    return text.replace(/\s+/g, '');
 }

@@ -726,18 +726,25 @@ body.pdf-plus-vim-hint-inverted {
         pointer-events: none;
     }
 
+    /* Outlines rather than borders: a border would change the width text boxes wrap at. */
     .annotationEditorLayer .freeTextEditor {
         pointer-events: auto;
-        border: 1px dashed hsla(var(--interactive-accent-hsl), 0.5);
+        outline: 1px dashed hsla(var(--interactive-accent-hsl), 0.5);
     }
 
     .annotationEditorLayer .freeTextEditor.selectedEditor {
-        border: 1px solid var(--interactive-accent);
+        outline: 1px solid var(--interactive-accent);
+    }
+
+    /* Resize handles (src/lib/textbox/resize.ts). */
+    .annotationEditorLayer .freeTextEditor.pdf-plus-textbox-resizable:is(:hover, .selectedEditor, .is-resizing) .pdf-plus-textbox-handle {
+        display: block;
     }
 }
 
 .annotationEditorLayer .freeTextEditor {
     position: absolute;
+    box-sizing: border-box;
     background: transparent;
     border-radius: 3px;
     padding: calc(var(--freetext-padding) * var(--total-scale-factor, 1));
@@ -774,6 +781,47 @@ body.pdf-plus-vim-hint-inverted {
     .editToolbar {
         display: none;
     }
+}
+
+/* A text box with a width set by the user wraps its text; the height follows the text. */
+.annotationEditorLayer .freeTextEditor.pdf-plus-textbox-fixed-width {
+    max-width: none;
+
+    .internal {
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+    }
+}
+
+.annotationEditorLayer .freeTextEditor .pdf-plus-textbox-handle {
+    /* Invisible grab areas on all four corners; only the bottom right one shows a grip. */
+    display: none;
+    position: absolute;
+    z-index: 2;
+    width: 12px;
+    height: 12px;
+    touch-action: none;
+
+    &.pdf-plus-textbox-handle-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+    &.pdf-plus-textbox-handle-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+    &.pdf-plus-textbox-handle-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+    &.pdf-plus-textbox-handle-se {
+        bottom: -3px;
+        right: -3px;
+        width: 10px;
+        height: 10px;
+        cursor: nwse-resize;
+        opacity: 0.7;
+        /* Two diagonal lines, like the resize grip of a text area. */
+        background: linear-gradient(135deg,
+            transparent 0 45%, var(--interactive-accent) 45% 55%,
+            transparent 55% 70%, var(--interactive-accent) 70% 80%,
+            transparent 80%);
+    }
+}
+
+.pdf-plus-textbox-active .annotationEditorLayer .freeTextEditor:is(.selectedEditor, .is-resizing) .pdf-plus-textbox-handle-se {
+    opacity: 1;
 }
 
 .annotationEditorLayer .freeTextEditor[data-editor-rotation="90"] {
