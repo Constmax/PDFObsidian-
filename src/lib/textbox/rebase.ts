@@ -23,7 +23,27 @@ export interface DraftBase {
     rect: number[];
     /** Text content, for annotation types that have one. */
     value?: string;
+    /** The formatting the editor was loaded with. The replayed edit writes these values back. */
+    style: AnnotationStyle;
 }
+
+/**
+ * Formatting properties of an annotation that a replayed edit overwrites, in the form pdf.js'
+ * editors take them from the annotation (`deserialize()`). Only those present are compared.
+ */
+export interface AnnotationStyle {
+    color?: number[] | null;
+    fontSize?: number;
+    opacity?: number;
+    thickness?: number;
+    rotation?: number;
+    comment?: string | null;
+}
+
+export const STYLE_KEYS = ['color', 'fontSize', 'opacity', 'thickness', 'rotation', 'comment'] as const;
+
+/** `AnnotationType.FREETEXT` in pdf.js. */
+const FREETEXT = 3;
 
 /** pdf.js' worker only treats annotation storage entries whose key starts with this as editors to save. */
 export const EDITOR_KEY_PREFIX = 'pdfjs_internal_editor_';
@@ -113,10 +133,37 @@ function findAnnotation(annots: any[], base: DraftBase): any | undefined {
         && rectsClose(annot.rect, base.rect)
         // Ignoring whitespace: text boxes with a fixed width have fewer line breaks as editors
         // than their appearance stream (`textContent`) shows (see resize.ts).
-        && (base.value === undefined || stripWhitespace((annot.textContent ?? []).join('')) === stripWhitespace(base.value));
+        && (base.value === undefined || stripWhitespace((annot.textContent ?? []).join('')) === stripWhitespace(base.value))
+        && stylesEqual(styleOf(annot), base.style);
 
     return annots.find((annot) => annot.id === base.id && matches(annot))
         ?? annots.find(matches);
+}
+
+/** The formatting of an annotation from `getAnnotations()`, taken the same way pdf.js' editors take it. */
+function styleOf(annot: any): AnnotationStyle {
+    return {
+        color: normalizeColor(annot.annotationType === FREETEXT ? annot.defaultAppearanceData?.fontColor : annot.color),
+        fontSize: annot.defaultAppearanceData?.fontSize,
+        opacity: annot.opacity,
+        thickness: annot.borderStyle?.rawWidth,
+        rotation: annot.rotation,
+        comment: annot.contentsObj?.str || null,
+    };
+}
+
+export function normalizeColor(color: ArrayLike<number> | null | undefined): number[] | null {
+    return color ? Array.from(color) : null;
+}
+
+/** Whether `current` has the same value as `base` for every property `base` has. */
+function stylesEqual(current: AnnotationStyle, base: AnnotationStyle) {
+    return STYLE_KEYS.every((key) => {
+        if (!(key in base)) return true;
+        const a = current[key], b = base[key];
+        if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
+        return (a ?? null) === (b ?? null);
+    });
 }
 
 function rectsClose(a: number[] | undefined, b: number[]) {
