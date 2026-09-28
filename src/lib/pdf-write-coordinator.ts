@@ -89,6 +89,8 @@ export class PDFWriteCoordinator extends PDFPlusLibSubmodule {
 
     /** Write pending drafts for `file`, if there are any. */
     async flush(file: TFile): Promise<void> {
+        // Don't read the whole file just to find out there is nothing to write.
+        if (!this.draftSourcesFor(file).length) return;
         await this.modify(file, () => null);
     }
 

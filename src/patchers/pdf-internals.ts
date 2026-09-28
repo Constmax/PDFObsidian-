@@ -11,7 +11,8 @@ import { patchPDFOutlineViewer } from 'patchers';
 import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
 import { PDFPlusToolbar } from 'toolbar';
 import { BibliographyManager } from 'bib';
-import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, selectDoubleClickedWord, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
+import { TextboxTool } from 'lib/textbox/tool';
+import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
 import { AnnotationElement, PDFOutlineViewer, PDFViewerComponent, PDFViewerChild, PDFSearchSettings, Rect, PDFAnnotationHighlight, PDFTextHighlight, PDFRectHighlight, ObsidianViewer, PDFPageView } from 'typings';
 import { SidebarView, SpreadMode } from 'pdfjs-enums';
 import { VimBindings } from 'vim/vim';
@@ -133,6 +134,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 this.palette = null;
                 this.rectHighlight = null;
                 this.bib = null;
+                this.textbox = null;
 
                 if (!this.component) {
                     this.component = plugin.addChild(new Component());
@@ -384,6 +386,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 this.bib?.unload();
                 this.bib = this.component.addChild(new BibliographyManager(plugin, this));
 
+                // Once per viewer, not per file load: unsaved text boxes must survive reloads.
+                if (!this.textbox) this.textbox = this.component.addChild(new TextboxTool(plugin, this));
+
                 // Register post-processors
 
                 lib.registerPDFEvent('annotationlayerrendered', this.pdfViewer.eventBus, this.component!, (data) => {
@@ -536,7 +541,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 }
 
                 if (this.pdfViewer.dom && this.component) {
-                    this.component.registerDomEvent(this.pdfViewer.dom.viewerEl, 'dblclick', selectDoubleClickedWord);
+                    registerDoubleClickWordSelection(this.component, this.pdfViewer.dom.viewerEl);
                     this.component.registerDomEvent(this.pdfViewer.dom.viewerEl, 'click', selectTrippleClickedTextLayerNode);
                 }
             };
