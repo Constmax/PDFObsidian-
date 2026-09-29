@@ -15,6 +15,7 @@ import { ColorPalette } from 'color-palette';
 import { ScrollMode, SidebarView, SpreadMode } from 'pdfjs-enums';
 import { BibliographyManager } from 'bib';
 import { TextboxTool } from 'lib/textbox/tool';
+import { ViewerLifecycle } from 'lib/viewer-lifecycle';
 import { VimBindings } from 'vim/vim';
 
 
@@ -167,7 +168,7 @@ interface PDFViewerChild {
     //////////////////////////
     // Added by this plugin //
     //////////////////////////
-    component?: Component;
+    component?: ViewerLifecycle;
     hoverPopover: HoverPopover | null;
     /** The color palette (and other PDF++-related UI elements) mounted on this PDF viewer. */
     palette: ColorPalette | null;

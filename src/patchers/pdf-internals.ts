@@ -1,4 +1,4 @@
-import { Component, MarkdownRenderer, Notice, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion, apiVersion } from 'obsidian';
+import { MarkdownRenderer, Notice, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion, apiVersion } from 'obsidian';
 import { around } from 'monkey-around';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 
@@ -12,6 +12,7 @@ import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
 import { PDFPlusToolbar } from 'toolbar';
 import { BibliographyManager } from 'bib';
 import { TextboxTool } from 'lib/textbox/tool';
+import { ViewerLifecycle, viewerFeatures } from 'lib/viewer-lifecycle';
 import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
 import { AnnotationElement, PDFOutlineViewer, PDFViewerComponent, PDFViewerChild, PDFSearchSettings, Rect, PDFAnnotationHighlight, PDFTextHighlight, PDFRectHighlight, ObsidianViewer, PDFPageView } from 'typings';
 import { SidebarView, SpreadMode } from 'pdfjs-enums';
@@ -137,11 +138,13 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 this.textbox = null;
 
                 if (!this.component) {
-                    this.component = plugin.addChild(new Component());
+                    this.component = new ViewerLifecycle(plugin, this, viewerFeatures);
                 }
-                this.component.load();
 
                 const ret = await old.call(this, ...args);
+
+                // Set up the features once pdf.js' viewer exists, unless the viewer was closed while loading.
+                if (!this.unloaded && !this.component._loaded) plugin.addChild(this.component);
 
                 const viewerContainerEl = this.pdfViewer?.dom?.viewerContainerEl;
                 if (viewerContainerEl) {
@@ -260,7 +263,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
 
                         const viewerContainerEl = this.pdfViewer?.dom?.viewerContainerEl;
                         if (plugin.settings.autoHidePDFSidebar && viewerContainerEl) {
-                            if (!this.component) this.component = plugin.addChild(new Component());
+                            if (!this.component) this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
 
                             this.component.registerDomEvent(viewerContainerEl, 'click', () => {
                                 this.pdfViewer.pdfSidebar.switchView(SidebarView.NONE);
@@ -311,7 +314,8 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
         },
         unload(old) {
             return function (this: PDFViewerChild) {
-                this.component?.unload();
+                // Unloads the features while pdf.js' viewer is still alive, and lets go of this viewer.
+                if (this.component) plugin.removeChild(this.component);
                 return old.call(this);
             };
         },
@@ -341,8 +345,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 }
 
                 if (!this.component) {
-                    this.component = plugin.addChild(new Component());
+                    this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
                 }
+                const ticket = this.component.beginDocument();
 
                 // If the file is small enough, first check the text content.
                 // If it's a URL to a PDF located outside the vault, tell ObsidianViewer to use the URL instead of `app.vault.getResourcePath(file)` (which is called inside the original `loadFile` method)
@@ -377,6 +382,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     this.externalFileUrl = null;
                     await old.call(this, file, subpath);
                 }
+
+                // Another load began in the meantime (and will set everything up), or the viewer was closed.
+                if (!this.component.documentLoaded(ticket, file)) return;
 
                 const pdfContainerEl = this.containerEl.querySelector<HTMLElement>('.pdf-container');
                 if (pdfContainerEl) {
@@ -880,7 +888,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                                 if (!markdown) return;
                                 contentEl.addClass('markdown-rendered');
                                 if (!this.component) {
-                                    this.component = plugin.addChild(new Component());
+                                    this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
                                 }
                                 await MarkdownRenderer.render(app, markdown, contentEl, '', this.component);
                                 hookInternalLinkMouseEventHandlers(app, contentEl, this.file?.path ?? '');
