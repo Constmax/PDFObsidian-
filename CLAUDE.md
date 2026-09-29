@@ -15,11 +15,12 @@ npm run lint       # eslint src/
 - The lockfile is `pnpm-lock.yaml` (upstream uses pnpm); `npm run …` works as well.
 - There are no automated tests. Changes are verified by loading the plugin in Obsidian.
 - To try a build, copy `main.js` and `styles.css` into a vault's `.obsidian/plugins/pdf-plus/`, then reload Obsidian (or toggle the plugin). The test vault is `../PDF++Test`.
+- Claude Code cloud sessions: `.claude/hooks/session-start.sh` runs `pnpm install` and installs a pinned Obsidian (`scripts/cloud/install-obsidian.sh`, version via `OBSIDIAN_VERSION`) to `/opt/obsidian/current`: the app in `app/`, the unpacked `obsidian.asar` in `src/` (its pdf.js is in `src/lib/pdfjs/`). `scripts/cloud/obsidian-headless.sh [args]` starts it under Xvfb with CDP on port 9222 (Playwright: `chromium.connectOverCDP('http://localhost:9222')`).
 - In the Obsidian dev console the plugin instance is available as the global `pdfPlus`.
 
 ## Runtime environment
 
-- pdf.js is **not bundled**: `pdfjs-dist` is external and only provides types (v5.x). At runtime the plugin uses Obsidian's own pdf.js via `window.pdfjsLib` / `window.pdfjsViewer`, loaded with `loadPdfJs()`. Obsidian currently ships **pdf.js 4.9** (`lib/pdfjs/pdf.min.mjs` inside `/Applications/Obsidian.app/Contents/Resources/obsidian.asar`). Check APIs against that version, not against `node_modules`.
+- pdf.js is **not bundled**: `pdfjs-dist` is external and only provides types (v5.x). At runtime the plugin uses Obsidian's own pdf.js via `window.pdfjsLib` / `window.pdfjsViewer`, loaded with `loadPdfJs()`. Obsidian currently ships **pdf.js 4.9** (`lib/pdfjs/pdf.min.mjs` inside `/Applications/Obsidian.app/Contents/Resources/obsidian.asar`). Check APIs against that version, not against `node_modules`. Newer Obsidian ships newer pdf.js (1.13.7: pdf.js 5.3.34, see `lib/pdfjs/version.json`).
 - Private pdf.js internals (annotation editor UI manager, editor layers, `_layerProperties`, …) are untyped; code declares small local interfaces for the parts it uses (see `src/lib/textbox/tool.ts`).
 - Imports resolve from `src/` (`baseUrl: ./src`), e.g. `import { PDFPlusLib } from 'lib'`, `from 'utils'`, `from 'typings'`.
 - Code style: 4-space indentation in `.ts` (despite `.editorconfig` saying tabs; `main.ts` and `settings.ts` use tabs), semicolons required.
