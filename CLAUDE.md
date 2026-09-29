@@ -15,7 +15,7 @@ npm run lint       # eslint src/
 - The lockfile is `pnpm-lock.yaml` (upstream uses pnpm); `npm run …` works as well.
 - There are no automated tests. Changes are verified by loading the plugin in Obsidian.
 - To try a build, copy `main.js` and `styles.css` into a vault's `.obsidian/plugins/pdf-plus/`, then reload Obsidian (or toggle the plugin). The test vault is `../PDF++Test`.
-- Claude Code cloud sessions: `.claude/hooks/session-start.sh` runs `pnpm install` and installs a pinned Obsidian (`scripts/cloud/install-obsidian.sh`, version via `OBSIDIAN_VERSION`) to `/opt/obsidian/current`: the app in `app/`, the unpacked `obsidian.asar` in `src/` (its pdf.js is in `src/lib/pdfjs/`). `scripts/cloud/obsidian-headless.sh [args]` starts it under Xvfb with CDP on port 9222 (Playwright: `chromium.connectOverCDP('http://localhost:9222')`).
+- Claude Code cloud sessions: `.claude/hooks/session-start.sh` runs `pnpm install` and installs a pinned Obsidian (`scripts/cloud/install-obsidian.sh`, version via `OBSIDIAN_VERSION`) to `/opt/obsidian/current`: the app in `app/`, the unpacked `obsidian.asar` in `src/` (its pdf.js is in `src/lib/pdfjs/`). To verify a change there, use `node scripts/cloud/obsidian-dev.mjs start|reload|open|screenshot|eval|stop`: it builds, runs the plugin in a headless Obsidian with the `test-vault/` fixture and drives it over CDP (details in the `obsidian-dev` skill, `.claude/skills/obsidian-dev/SKILL.md`).
 - In the Obsidian dev console the plugin instance is available as the global `pdfPlus`.
 
 ## Runtime environment
