@@ -54,14 +54,71 @@ export class PDFPlusToolbar extends PDFPlusComponent {
         });
         this.register(() => buttonEl.remove());
 
-        const fontSizeEl = createDiv(`clickable-icon ${TextboxTool.FONT_SIZE_CLS}`, (el) => {
+        const fontSizeEl = createDiv(TextboxTool.FONT_SIZE_CLS, (el) => {
             setTooltip(el, 'Font size');
-            el.createSpan({ cls: 'pdf-plus-textbox-font-size-value', text: String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize) });
-            setIcon(el.createSpan(), 'lucide-chevron-down');
             el.toggle(!!this.child.textbox?.active);
-            // Keep the focus in the text box being typed into.
-            el.addEventListener('mousedown', (evt) => evt.preventDefault());
-            el.addEventListener('click', () => {
+
+            // Buttons must not take the focus from the text box being typed into.
+            const addButton = (icon: string, tooltip: string, onClick: (buttonEl: HTMLElement) => void) => {
+                return el.createDiv('clickable-icon', (buttonEl) => {
+                    setIcon(buttonEl, icon);
+                    setTooltip(buttonEl, tooltip);
+                    buttonEl.addEventListener('mousedown', (evt) => evt.preventDefault());
+                    buttonEl.addEventListener('click', () => onClick(buttonEl));
+                });
+            };
+            const step = (delta: number) => {
+                const tool = this.child.textbox;
+                if (!tool) return;
+                tool.rememberActiveEditor();
+                tool.setFontSize(TextboxTool.clampFontSize(tool.fontSize + delta));
+            };
+
+            addButton('lucide-minus', 'Decrease font size', () => step(-1));
+
+            const inputEl = el.createEl('input', {
+                cls: 'pdf-plus-textbox-font-size-value',
+                type: 'text',
+                attr: { inputmode: 'numeric', 'aria-label': 'Font size' },
+                value: String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize),
+            });
+            const apply = () => {
+                const tool = this.child.textbox;
+                if (!tool) return;
+                const value = parseFloat(inputEl.value.replace(',', '.'));
+                if (isNaN(value)) {
+                    inputEl.value = String(tool.fontSize);
+                    return;
+                }
+                const size = TextboxTool.clampFontSize(value);
+                inputEl.value = String(size);
+                if (size !== tool.fontSize) tool.setFontSize(size);
+            };
+            inputEl.addEventListener('focus', () => {
+                // Focusing the input ends the edit mode of the text box.
+                this.child.textbox?.rememberActiveEditor();
+                inputEl.select();
+            });
+            inputEl.addEventListener('change', apply);
+            inputEl.addEventListener('keydown', (evt) => {
+                // Don't let pdf.js or Obsidian handle keys typed here.
+                evt.stopPropagation();
+                if (evt.key === 'Enter') {
+                    // setFontSize() hands the focus back to the text box, if there was one.
+                    apply();
+                    inputEl.blur();
+                } else if (evt.key === 'Escape') {
+                    inputEl.value = String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize);
+                    inputEl.blur();
+                } else if (evt.key === 'ArrowUp' || evt.key === 'ArrowDown') {
+                    evt.preventDefault();
+                    step(evt.key === 'ArrowUp' ? 1 : -1);
+                }
+            });
+
+            addButton('lucide-plus', 'Increase font size', () => step(1));
+
+            addButton('lucide-chevron-down', 'Font size presets', (buttonEl) => {
                 const tool = this.child.textbox;
                 if (!tool) return;
                 tool.rememberActiveEditor();
@@ -73,7 +130,7 @@ export class PDFPlusToolbar extends PDFPlusComponent {
                             .onClick(() => tool.setFontSize(size));
                     });
                 }
-                showMenuUnderParentEl(menu, el);
+                showMenuUnderParentEl(menu, buttonEl);
             });
         });
         buttonEl.after(fontSizeEl);

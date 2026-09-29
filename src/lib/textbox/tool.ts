@@ -58,8 +58,15 @@ export class TextboxTool extends PDFPlusComponent {
     static BUTTON_CLS = 'pdf-plus-textbox-button';
     static FONT_SIZE_CLS = 'pdf-plus-textbox-font-size';
     static FONT_SIZES = [6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+    static MIN_FONT_SIZE = 1;
+    static MAX_FONT_SIZE = 200;
     /** Font size of new text boxes, shared by all viewers like pdf.js' own default. */
     static defaultFontSize = 10;
+
+    /** Round to an integer within the allowed range. */
+    static clampFontSize(size: number) {
+        return Math.min(TextboxTool.MAX_FONT_SIZE, Math.max(TextboxTool.MIN_FONT_SIZE, Math.round(size)));
+    }
 
     child: PDFViewerChild;
     drafts: PDFViewerDrafts;
@@ -195,7 +202,7 @@ export class TextboxTool extends PDFPlusComponent {
     private showFontSize(size: number) {
         this.fontSize = size;
         const el = this.child.toolbar?.toolbarLeftEl.querySelector('.' + TextboxTool.FONT_SIZE_CLS + ' .pdf-plus-textbox-font-size-value');
-        if (el) el.textContent = String(size);
+        if (el instanceof HTMLInputElement) el.value = String(size);
     }
 
     /** Turn the tool off and save the text boxes. */
