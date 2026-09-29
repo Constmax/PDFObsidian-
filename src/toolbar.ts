@@ -3,7 +3,7 @@ import { Menu, Platform, setIcon, setTooltip } from 'obsidian';
 import PDFPlus from 'main';
 import { PDFPlusComponent } from 'lib/component';
 import { ColorPalette } from 'color-palette';
-import { TextboxTool } from 'lib/textbox/tool';
+import { FontSizeTarget, TextboxTool } from 'lib/textbox/tool';
 import { PDFToolbar, PDFViewerChild } from 'typings';
 import { showChildElOnParentElHover, showMenuUnderParentEl } from 'utils';
 import { ScrollMode, SpreadMode } from 'pdfjs-enums';
@@ -67,67 +67,115 @@ export class PDFPlusToolbar extends PDFPlusComponent {
                     buttonEl.addEventListener('click', () => onClick(buttonEl));
                 });
             };
-            const step = (delta: number) => {
-                const tool = this.child.textbox;
-                if (!tool) return;
-                tool.rememberActiveEditor();
-                tool.setFontSize(TextboxTool.clampFontSize(tool.fontSize + delta));
-            };
 
-            addButton('lucide-minus', 'Decrease font size', () => step(-1));
-
-            const inputEl = el.createEl('input', {
+            const inputEl = createEl('input', {
                 cls: 'pdf-plus-textbox-font-size-value',
                 type: 'text',
                 attr: { inputmode: 'numeric', 'aria-label': 'Font size' },
                 value: String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize),
             });
-            const apply = () => {
+            /** While the input has the focus: the text boxes the size applies to. */
+            let inputTarget: FontSizeTarget | null = null;
+            /** Whether the input holds a typed value that hasn't been applied yet. */
+            let dirty = false;
+
+            const showSize = () => {
+                inputEl.value = String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize);
+                dirty = false;
+            };
+            const setSize = (size: number) => {
                 const tool = this.child.textbox;
                 if (!tool) return;
-                const value = parseFloat(inputEl.value.replace(',', '.'));
-                if (isNaN(value)) {
-                    inputEl.value = String(tool.fontSize);
-                    return;
-                }
-                const size = TextboxTool.clampFontSize(value);
-                inputEl.value = String(size);
-                if (size !== tool.fontSize) tool.setFontSize(size);
+                // While the input has the focus, the text box gets it back when the input is done.
+                if (inputTarget) tool.setFontSize(size, inputTarget, false);
+                else tool.setFontSize(size);
+                showSize();
             };
+            const step = (delta: number) => {
+                const tool = this.child.textbox;
+                if (!tool) return;
+                const typed = dirty ? parseFloat(inputEl.value.replace(',', '.')) : NaN;
+                const size = isNaN(typed) ? tool.fontSize : typed;
+                // Whole numbers only, also from sizes like 10.5 of existing annotations.
+                setSize(TextboxTool.clampFontSize(delta > 0 ? Math.floor(size) + delta : Math.ceil(size) + delta));
+            };
+            const apply = () => {
+                if (!dirty) return;
+                const typed = parseFloat(inputEl.value.replace(',', '.'));
+                if (isNaN(typed)) showSize();
+                else setSize(TextboxTool.clampFontSize(typed));
+            };
+            const endInput = (returnFocus: boolean) => {
+                const target = inputTarget;
+                inputTarget = null;
+                inputEl.win.removeEventListener('pointerdown', onPointerDown, true);
+                if (target) this.child.textbox?.endFontSizeInput(target, returnFocus);
+            };
+            const beginInput = () => {
+                if (inputTarget || !this.child.textbox) return;
+                inputTarget = this.child.textbox.beginFontSizeInput();
+                inputEl.win.addEventListener('pointerdown', onPointerDown, true);
+            };
+            // A click elsewhere ends the input before pdf.js handles it: applying the size moves
+            // the text box (pdf.js keeps its top line in place), which pdf.js would otherwise
+            // take for dragging it, and not select the text box that was clicked.
+            const onPointerDown = (evt: PointerEvent) => {
+                if (evt.target instanceof Node && el.contains(evt.target)) return;
+                apply();
+                endInput(false);
+            };
+
+            addButton('lucide-minus', 'Decrease font size', () => step(-1));
+            el.append(inputEl);
+            addButton('lucide-plus', 'Increase font size', () => step(1));
+
+            // Before the focus moves, while the text box being typed into is still in edit mode.
+            inputEl.addEventListener('pointerdown', () => {
+                if (inputEl.ownerDocument.activeElement !== inputEl) beginInput();
+            });
             inputEl.addEventListener('focus', () => {
-                // Focusing the input ends the edit mode of the text box.
-                this.child.textbox?.rememberActiveEditor();
+                // Focused with the keyboard, or back from another window.
+                beginInput();
                 inputEl.select();
             });
-            inputEl.addEventListener('change', apply);
+            inputEl.addEventListener('input', () => dirty = true);
+            inputEl.addEventListener('blur', () => {
+                // Another window got the focus: continue when it comes back.
+                if (!inputEl.ownerDocument.hasFocus()) return;
+                apply();
+                endInput(false);
+                showSize();
+            });
             inputEl.addEventListener('keydown', (evt) => {
                 // Don't let pdf.js or Obsidian handle keys typed here.
                 evt.stopPropagation();
-                if (evt.key === 'Enter') {
-                    // setFontSize() hands the focus back to the text box, if there was one.
-                    apply();
-                    inputEl.blur();
-                } else if (evt.key === 'Escape') {
-                    inputEl.value = String(this.child.textbox?.fontSize ?? TextboxTool.defaultFontSize);
-                    inputEl.blur();
+                if (evt.key === 'Enter' || evt.key === 'Escape') {
+                    // Don't let the key reach the text box that gets the focus back.
+                    evt.preventDefault();
+                    if (evt.key === 'Enter') apply();
+                    else showSize();
+                    endInput(true);
+                    if (inputEl.ownerDocument.activeElement === inputEl) inputEl.blur();
                 } else if (evt.key === 'ArrowUp' || evt.key === 'ArrowDown') {
                     evt.preventDefault();
                     step(evt.key === 'ArrowUp' ? 1 : -1);
                 }
             });
 
-            addButton('lucide-plus', 'Increase font size', () => step(1));
-
             addButton('lucide-chevron-down', 'Font size presets', (buttonEl) => {
                 const tool = this.child.textbox;
                 if (!tool) return;
-                tool.rememberActiveEditor();
+                // The menu may take the focus.
+                const target = inputTarget ?? tool.captureFontSizeTarget();
                 const menu = new Menu();
                 for (const size of TextboxTool.FONT_SIZES) {
                     menu.addItem((item) => {
                         item.setTitle(String(size))
                             .setChecked(size === tool.fontSize)
-                            .onClick(() => tool.setFontSize(size));
+                            .onClick(() => {
+                                tool.setFontSize(size, target, !inputTarget);
+                                showSize();
+                            });
                     });
                 }
                 showMenuUnderParentEl(menu, buttonEl);
@@ -145,6 +193,8 @@ export class PDFPlusToolbar extends PDFPlusComponent {
         toolbar.toolbarLeftEl.querySelectorAll<HTMLElement>('div.clickable-icon')
             .forEach((buttonEl) => {
                 const iconEl = buttonEl.firstElementChild;
+                // Opening the font size presets on hover would take the keys typed into a text box.
+                if (buttonEl.closest('.' + TextboxTool.FONT_SIZE_CLS)) return;
                 if (iconEl && iconEl.matches('svg.lucide-chevron-down')) {
                     let childMenu: Menu | null = null;
 

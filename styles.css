@@ -843,10 +843,6 @@ body.pdf-plus-vim-hint-inverted {
     font-size: var(--font-ui-small);
     font-variant-numeric: tabular-nums;
 
-    &[style*="display: none"] {
-        display: none;
-    }
-
     input.pdf-plus-textbox-font-size-value {
         width: 4ch;
         height: var(--input-height, 24px);
