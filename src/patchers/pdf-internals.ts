@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Notice, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion, apiVersion } from 'obsidian';
+import { MarkdownRenderer, TFile, debounce, setIcon, setTooltip, Keymap, Menu, Platform, requireApiVersion, apiVersion } from 'obsidian';
 import { around } from 'monkey-around';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 
@@ -9,10 +9,10 @@ import { registerAnnotationPopupDrag, registerOutlineDrag, registerThumbnailDrag
 import { PDFInternalLinkPostProcessor, PDFOutlineItemPostProcessor, PDFThumbnailItemPostProcessor, PDFExternalLinkPostProcessor } from 'post-process';
 import { patchPDFOutlineViewer } from 'patchers';
 import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
-import { PDFPlusToolbar } from 'toolbar';
 import { BibliographyManager } from 'bib';
 import { TextboxTool } from 'lib/textbox/tool';
-import { ViewerLifecycle, viewerFeatures } from 'lib/viewer-lifecycle';
+import { ViewerLifecycle } from 'lib/viewer-lifecycle';
+import { viewerFeatures } from 'lib/viewer-features';
 import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
 import { AnnotationElement, PDFOutlineViewer, PDFViewerComponent, PDFViewerChild, PDFSearchSettings, Rect, PDFAnnotationHighlight, PDFTextHighlight, PDFRectHighlight, ObsidianViewer, PDFPageView } from 'typings';
 import { SidebarView, SpreadMode } from 'pdfjs-enums';
@@ -243,40 +243,6 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                         isModEvent = false;
                     };
                 }
-
-                const addColorPaletteToToolbar = () => {
-                    try {
-                        if (this.toolbar) {
-                            plugin.domManager.addChild(new PDFPlusToolbar(plugin, this.toolbar, this));
-                        } else {
-                            // Should not happen, but just in case
-                            const timer = window.setInterval(() => {
-                                if (this.toolbar) {
-                                    plugin.domManager.addChild(new PDFPlusToolbar(plugin, this.toolbar, this));
-                                    window.clearInterval(timer);
-                                }
-                            }, 100);
-                            window.setTimeout(() => {
-                                window.clearInterval(timer);
-                            }, 1000);
-                        }
-
-                        const viewerContainerEl = this.pdfViewer?.dom?.viewerContainerEl;
-                        if (plugin.settings.autoHidePDFSidebar && viewerContainerEl) {
-                            if (!this.component) this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
-
-                            this.component.registerDomEvent(viewerContainerEl, 'click', () => {
-                                this.pdfViewer.pdfSidebar.switchView(SidebarView.NONE);
-                            });
-                        }
-                    } catch (e) {
-                        new Notice(`${plugin.manifest.name}: An error occurred while mounting the color palette to the toolbar.`);
-                        console.error(e);
-                    }
-                };
-
-                addColorPaletteToToolbar();
-                plugin.on('update-dom', addColorPaletteToToolbar);
 
                 if (// Use !isMobile, not isDesktopApp, because in app.js, PDFViewerChild.onMobileCopy is called when isMobile is true.
                     !Platform.isMobile

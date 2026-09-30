@@ -1,7 +1,7 @@
 import { Component, TFile } from 'obsidian';
 
-import PDFPlus from 'main';
-import { PDFViewerChild } from 'typings';
+import type PDFPlus from 'main';
+import type { PDFToolbar, PDFViewerChild } from 'typings';
 
 
 export interface ViewerContext {
@@ -11,6 +11,10 @@ export interface ViewerContext {
 
 export interface DocumentContext extends ViewerContext {
     file: TFile;
+}
+
+export interface ToolbarContext extends ViewerContext {
+    toolbar: PDFToolbar;
 }
 
 /**
@@ -30,11 +34,17 @@ export interface ViewerFeature {
      * so this runs again after each write. `scope` ends when the next load begins, and when the viewer is unloaded.
      */
     document?(scope: Component, ctx: DocumentContext): void;
+    /**
+     * Called every time the viewer's toolbar is set up: once per viewer, and again on every 'update-dom'
+     * (e.g. after a setting changed). `scope` ends when the toolbar is set up again, and when the viewer is unloaded.
+     */
+    toolbar?(scope: Component, ctx: ToolbarContext): void;
 }
 
 /**
  * The lifetimes of one PDF viewer (`PDFViewerChild`), as nested components: this component lives as
- * long as the viewer, and holds a child component for the document currently loaded.
+ * long as the viewer, and holds child components for the document currently loaded and for the
+ * current contents of the toolbar.
  *
  * Handlers registered once per file load on a component that lives as long as the viewer pile up,
  * since every write to the file reloads it. The document scope gives them a lifetime that matches.
@@ -44,6 +54,7 @@ export class ViewerLifecycle extends Component {
     document: Component | null = null;
     /** Identifies the latest load, so that an earlier one finishing late doesn't open a scope. */
     private loadCount = 0;
+    private toolbarScope: Component | null = null;
 
     constructor(public plugin: PDFPlus, public child: PDFViewerChild, private features: readonly ViewerFeature[]) {
         super();
@@ -53,6 +64,31 @@ export class ViewerLifecycle extends Component {
         const ctx: ViewerContext = { plugin: this.plugin, child: this.child };
         for (const feature of this.features) {
             if (feature.viewer) this.runHook(feature, 'viewer', () => feature.viewer!(this, ctx));
+        }
+
+        this.setUpToolbar();
+        // Registered on this component, so that a closed viewer stops rebuilding its toolbar.
+        this.registerEvent(this.plugin.on('update-dom', () => this.setUpToolbar()));
+    }
+
+    /** Remove what the features added to the toolbar, and let them add it again. */
+    setUpToolbar() {
+        if (this.toolbarScope) this.removeChild(this.toolbarScope);
+        const scope = this.toolbarScope = this.addChild(new Component());
+
+        const toolbar = this.child.toolbar;
+        if (!toolbar) {
+            // Should not happen: the toolbar exists as soon as pdf.js' viewer is set up. Retry for a second just in case.
+            const timer = scope.registerInterval(window.setInterval(() => {
+                if (this.child.toolbar) this.setUpToolbar();
+            }, 100));
+            window.setTimeout(() => window.clearInterval(timer), 1000);
+            return;
+        }
+
+        const ctx: ToolbarContext = { plugin: this.plugin, child: this.child, toolbar };
+        for (const feature of this.features) {
+            if (feature.toolbar) this.runHook(feature, 'toolbar', () => feature.toolbar!(scope, ctx));
         }
     }
 
@@ -92,6 +128,3 @@ export class ViewerLifecycle extends Component {
         }
     }
 }
-
-/** The features attached to every PDF viewer, in the order they are set up. */
-export const viewerFeatures: ViewerFeature[] = [];
