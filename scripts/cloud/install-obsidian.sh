@@ -11,7 +11,7 @@
 # Idempotent: does nothing if the version is already installed.
 set -euo pipefail
 
-OBSIDIAN_VERSION="${OBSIDIAN_VERSION:-1.13.7}"
+OBSIDIAN_VERSION="${OBSIDIAN_VERSION:-1.13.4}"
 ROOT="${OBSIDIAN_ROOT:-/opt/obsidian}"
 DEST="$ROOT/$OBSIDIAN_VERSION"
 
