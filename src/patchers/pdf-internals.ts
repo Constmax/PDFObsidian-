@@ -89,9 +89,13 @@ const patchPDFViewerComponent = (plugin: PDFPlus, pdfViewerComponent: PDFViewerC
                 const ret = await old.call(this, file, subpath);
 
                 this.then((child) => {
-                    if (!this.visualizer || this.visualizer.file !== file) {
-                        this.visualizer?.unload();
-                        this.visualizer = this.addChild(PDFViewerBacklinkVisualizer.create(plugin, file, child));
+                    // An unloaded one is left from before this viewer or the plugin was reloaded.
+                    if (!this.visualizer || this.visualizer.file !== file || !this.visualizer._loaded) {
+                        // The visualizer is a child of the plugin, so that it goes when the plugin is disabled
+                        // (Obsidian's viewer stays). The viewer lets go of it when it's replaced or the viewer closes.
+                        if (this.visualizer) plugin.removeChild(this.visualizer);
+                        const visualizer = this.visualizer = PDFViewerBacklinkVisualizer.create(plugin, file, child);
+                        this.register(() => plugin.removeChild(visualizer));
                     }
                 });
 
