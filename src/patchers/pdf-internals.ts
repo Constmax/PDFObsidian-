@@ -135,7 +135,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 this.bib = null;
                 this.textbox = null;
 
-                if (!this.component) {
+                if (!(this.component instanceof ViewerLifecycle)) {
                     this.component = new ViewerLifecycle(plugin, this, viewerFeatures);
                 }
 
@@ -308,7 +308,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     return;
                 }
 
-                if (!this.component) {
+                // A viewer that stayed open while the plugin was reloaded (e.g. updated) still holds the component
+                // of the previous plugin instance, which was unloaded with it.
+                if (!(this.component instanceof ViewerLifecycle)) {
                     this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
                 }
                 const ticket = this.component.beginDocument();
@@ -845,7 +847,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                             .then(async (markdown) => {
                                 if (!markdown) return;
                                 contentEl.addClass('markdown-rendered');
-                                if (!this.component) {
+                                if (!(this.component instanceof ViewerLifecycle)) {
                                     this.component = plugin.addChild(new ViewerLifecycle(plugin, this, viewerFeatures));
                                 }
                                 await MarkdownRenderer.render(app, markdown, contentEl, '', this.component);
