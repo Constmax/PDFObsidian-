@@ -251,7 +251,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 ) {
                     const eventBus = this.pdfViewer.eventBus;
                     if (eventBus) {
-                        eventBus.on('textlayerrendered', ({ source: pageView }) => {
+                        lib.registerPDFEvent('textlayerrendered', eventBus, this.component, ({ source: pageView }) => {
                             const textLayerDiv = pageView?.textLayer?.div;
                             if (textLayerDiv) {
                                 textLayerDiv.addEventListener('copy', onCopy);
@@ -354,12 +354,15 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     plugin.pdfViewerChildren.set(pdfContainerEl, this);
                 }
 
+                // Handlers for the document just loaded go on its scope: every write reloads the viewer, and
+                // handlers registered for the viewer's whole lifetime would pile up with each reload.
+                const documentScope = this.component.documentLoaded(ticket, file);
                 // Another load began in the meantime (and will set everything up), or the viewer was closed.
-                if (!this.component.documentLoaded(ticket, file)) return;
+                if (!documentScope) return;
 
                 // Register post-processors
 
-                lib.registerPDFEvent('annotationlayerrendered', this.pdfViewer.eventBus, this.component!, (data) => {
+                lib.registerPDFEvent('annotationlayerrendered', this.pdfViewer.eventBus, documentScope, (data) => {
                     const { source: pageView } = data;
 
                     pageView.annotationLayer?.div
@@ -404,7 +407,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                                             this.destroyAnnotationPopup();
                                         }
                                     },
-                                    component: this.component,
+                                    component: documentScope,
                                 });
                             }
 
@@ -413,7 +416,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 });
 
                 lib.registerPDFEvent(
-                    'outlineloaded', this.pdfViewer.eventBus, null,
+                    'outlineloaded', this.pdfViewer.eventBus, documentScope,
                     async (data: { source: PDFOutlineViewer, outlineCount: number, currentOutlineItemPromise: Promise<void> }) => {
                         const pdfOutlineViewer = data.source;
 
@@ -434,16 +437,17 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                         pdfOutlineViewer.allItems.forEach((item) => PDFOutlineItemPostProcessor.registerEvents(plugin, this, item));
 
                         if (plugin.settings.outlineContextMenu) {
-                            plugin.registerDomEvent(pdfOutlineViewer.childrenEl, 'contextmenu', (evt) => {
+                            documentScope.registerDomEvent(pdfOutlineViewer.childrenEl, 'contextmenu', (evt) => {
                                 if (evt.target === evt.currentTarget) {
                                     onOutlineContextMenu(plugin, this, file, evt);
                                 }
                             });
                         }
-                    }
+                    },
+                    { once: true }
                 );
 
-                lib.registerPDFEvent('thumbnailrendered', this.pdfViewer.eventBus, null, () => {
+                lib.registerPDFEvent('thumbnailrendered', this.pdfViewer.eventBus, documentScope, () => {
                     const file = this.file;
                     if (!file) return;
                     if (plugin.settings.thumbnailDrag) {
@@ -451,14 +455,14 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     }
 
                     PDFThumbnailItemPostProcessor.registerEvents(plugin, this);
-                });
+                }, { once: true });
 
                 if (plugin.settings.noSpreadModeInEmbed && !isNonEmbedLike(this.pdfViewer)) {
-                    lib.registerPDFEvent('pagerendered', this.pdfViewer.eventBus, null, () => {
+                    lib.registerPDFEvent('pagerendered', this.pdfViewer.eventBus, documentScope, () => {
                         this.pdfViewer.eventBus.dispatch('switchspreadmode', {
                             mode: SpreadMode.NONE,
                         });
-                    });
+                    }, { once: true });
                 }
 
                 // Added in PDF++ 0.40.22
@@ -472,15 +476,15 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                 // and the `page-fit` behavior.
                 // To fix it, I had to force `page-width` for PDF embeds. 
                 if (isEmbed(this.pdfViewer)) {
-                    lib.registerPDFEvent('documentinit', this.pdfViewer.eventBus, null, () => {
+                    lib.registerPDFEvent('documentinit', this.pdfViewer.eventBus, documentScope, () => {
                         this.pdfViewer.eventBus.dispatch('scalechanged', {
                             source: this.toolbar,
                             value: 'page-width',
                         });
-                    });
+                    }, { once: true });
                 }
 
-                lib.registerPDFEvent('sidebarviewchanged', this.pdfViewer.eventBus, null, (data) => {
+                lib.registerPDFEvent('sidebarviewchanged', this.pdfViewer.eventBus, documentScope, (data) => {
                     const { source: pdfSidebar } = data;
                     if (plugin.settings.noSidebarInEmbed && !isNonEmbedLike(this.pdfViewer)) {
                         pdfSidebar.close();
@@ -488,14 +492,14 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     if (plugin.settings.defaultSidebarView === SidebarView.OUTLINE && pdfSidebar.haveOutline) {
                         pdfSidebar.switchView(SidebarView.OUTLINE);
                     }
-                });
+                }, { once: true });
 
                 // For https://github.com/RyotaUshio/obsidian-view-sync
                 if (isNonEmbedLike(this.pdfViewer)) {
                     lib.registerPDFEvent(
                         'pagechanging',
                         this.pdfViewer.eventBus,
-                        this.component,
+                        documentScope,
                         debounce(({ pageNumber }) => {
                             if (plugin.settings.viewSyncFollowPageNumber) {
                                 const view = lib.workspace.getActivePDFView();
@@ -508,9 +512,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     );
                 }
 
-                if (this.pdfViewer.dom && this.component) {
-                    registerDoubleClickWordSelection(this.component, this.pdfViewer.dom.viewerEl);
-                    this.component.registerDomEvent(this.pdfViewer.dom.viewerEl, 'click', selectTrippleClickedTextLayerNode);
+                if (this.pdfViewer.dom) {
+                    registerDoubleClickWordSelection(documentScope, this.pdfViewer.dom.viewerEl);
+                    documentScope.registerDomEvent(this.pdfViewer.dom.viewerEl, 'click', selectTrippleClickedTextLayerNode);
                 }
             };
         },
