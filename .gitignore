@@ -23,3 +23,8 @@ data.json
 
 # Anystyle input files
 anystyle/
+
+# Test vault fixture: keep its plugin settings, but never a build
+!test-vault/.obsidian/plugins/pdf-plus/data.json
+test-vault/.obsidian/plugins/pdf-plus/*.js
+test-vault/.obsidian/plugins/pdf-plus/*.css
