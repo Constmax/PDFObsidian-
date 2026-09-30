@@ -1,8 +1,10 @@
 import { Notice } from 'obsidian';
 
 import { PDFPlusToolbar } from 'toolbar';
+import { BibliographyManager } from 'bib';
 import { SidebarView } from 'pdfjs-enums';
 import { ViewerFeature } from './viewer-lifecycle';
+import { textboxFeature } from './textbox/feature';
 
 
 /** PDF++'s part of the toolbar: color palette, display options, zoom level input, ... */
@@ -25,7 +27,17 @@ const toolbarFeature: ViewerFeature = {
     },
 };
 
+/** Detects the bibliography of the document, for citation popovers. */
+const bibFeature: ViewerFeature = {
+    name: 'bibliography',
+    document(scope, { plugin, child }) {
+        child.bib = scope.addChild(new BibliographyManager(plugin, child));
+    },
+};
+
 /** The features attached to every PDF viewer, in the order they are set up. */
 export const viewerFeatures: ViewerFeature[] = [
     toolbarFeature,
+    textboxFeature,
+    bibFeature,
 ];

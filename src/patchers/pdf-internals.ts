@@ -9,8 +9,6 @@ import { registerAnnotationPopupDrag, registerOutlineDrag, registerThumbnailDrag
 import { PDFInternalLinkPostProcessor, PDFOutlineItemPostProcessor, PDFThumbnailItemPostProcessor, PDFExternalLinkPostProcessor } from 'post-process';
 import { patchPDFOutlineViewer } from 'patchers';
 import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
-import { BibliographyManager } from 'bib';
-import { TextboxTool } from 'lib/textbox/tool';
 import { ViewerLifecycle } from 'lib/viewer-lifecycle';
 import { viewerFeatures } from 'lib/viewer-features';
 import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
@@ -349,19 +347,13 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     await old.call(this, file, subpath);
                 }
 
-                // Another load began in the meantime (and will set everything up), or the viewer was closed.
-                if (!this.component.documentLoaded(ticket, file)) return;
-
                 const pdfContainerEl = this.containerEl.querySelector<HTMLElement>('.pdf-container');
                 if (pdfContainerEl) {
                     plugin.pdfViewerChildren.set(pdfContainerEl, this);
                 }
 
-                this.bib?.unload();
-                this.bib = this.component.addChild(new BibliographyManager(plugin, this));
-
-                // Once per viewer, not per file load: unsaved text boxes must survive reloads.
-                if (!this.textbox) this.textbox = this.component.addChild(new TextboxTool(plugin, this));
+                // Another load began in the meantime (and will set everything up), or the viewer was closed.
+                if (!this.component.documentLoaded(ticket, file)) return;
 
                 // Register post-processors
 
