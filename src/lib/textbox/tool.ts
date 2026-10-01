@@ -25,8 +25,9 @@ interface EditorLayer {
 
 interface UIManager {
     hasSelection: boolean;
-    firstSelectedEditor: TextEditor | undefined;
     getActive(): TextEditor | null;
+    getEditors(pageIndex: number): TextEditor[];
+    isSelected(editor: TextEditor): boolean;
     updateParams(type: number, value: unknown): void;
 }
 
@@ -35,12 +36,24 @@ interface TextEditor {
     y: number;
     parent: EditorLayer | null;
     parentDimensions: [number, number];
+    div: HTMLElement;
     editorDiv?: HTMLElement;
+    /** While false, pdf.js ignores focusin/focusout of the editor. */
+    _focusEventsAllowed: boolean;
     isInEditMode(): boolean;
     enableEditMode(): void;
     commitOrRemove(): void;
+    updateParams(type: number, value: unknown): void;
     getInitialTranslation(): [number, number];
     translate(x: number, y: number): void;
+}
+
+/** The text boxes a font size chosen in the toolbar applies to. */
+export interface FontSizeTarget {
+    /** The text box being typed into, and the caret in it. */
+    editing: TextEditor | null;
+    range: Range | null;
+    selected: TextEditor[];
 }
 
 /**
@@ -58,8 +71,15 @@ export class TextboxTool extends PDFPlusComponent {
     static BUTTON_CLS = 'pdf-plus-textbox-button';
     static FONT_SIZE_CLS = 'pdf-plus-textbox-font-size';
     static FONT_SIZES = [6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+    static MIN_FONT_SIZE = 1;
+    static MAX_FONT_SIZE = 200;
     /** Font size of new text boxes, shared by all viewers like pdf.js' own default. */
     static defaultFontSize = 10;
+
+    /** Round to an integer within the allowed range. */
+    static clampFontSize(size: number) {
+        return Math.min(TextboxTool.MAX_FONT_SIZE, Math.max(TextboxTool.MIN_FONT_SIZE, Math.round(size)));
+    }
 
     child: PDFViewerChild;
     drafts: PDFViewerDrafts;
@@ -68,8 +88,6 @@ export class TextboxTool extends PDFPlusComponent {
     fontSize = TextboxTool.defaultFontSize;
     /** Whether the current pointer gesture started inside a text box. */
     private gestureInTextbox = false;
-    /** The text box that was being typed into when a toolbar menu was opened. */
-    private lastActiveEditor: TextEditor | null = null;
 
     constructor(plugin: PDFPlus, child: PDFViewerChild) {
         super(plugin);
@@ -160,42 +178,129 @@ export class TextboxTool extends PDFPlusComponent {
     }
 
     /**
-     * Set the font size of the selected text boxes and of new ones. The text box being typed
-     * into stays in edit mode.
+     * The text boxes a font size chosen in the toolbar applies to. Capture it before the toolbar
+     * takes the focus (which ends the edit mode of the text box being typed into): a click
+     * elsewhere can change the selection before the size is applied.
      */
-    setFontSize(size: number) {
+    captureFontSizeTarget(): FontSizeTarget {
+        const editing = this.activeEditor();
+        let range: Range | null = null;
+        if (editing?.editorDiv) {
+            const selection = editing.editorDiv.ownerDocument.getSelection();
+            if (selection?.rangeCount && editing.editorDiv.contains(selection.anchorNode)) {
+                range = selection.getRangeAt(0).cloneRange();
+            }
+        }
+        return { editing, range, selected: this.selectedEditors() };
+    }
+
+    /**
+     * Set the font size of the target's text boxes (by default the selected ones) and of new
+     * ones. Unless `returnFocus` is false, the text box that was being typed into gets the focus
+     * back.
+     */
+    setFontSize(size: number, target = this.captureFontSizeTarget(), returnFocus = true) {
         const uiManager = this.uiManager;
         if (!uiManager) return;
 
-        // Opening the menu moved the focus out of the text box, which ended its edit mode.
-        const editing = this.lastActiveEditor;
-        this.lastActiveEditor = null;
-
-        // Changes the selected text boxes, or pdf.js' default if none is selected.
-        uiManager.updateParams(PARAM_FREETEXT_SIZE, size);
-        const selected = uiManager.firstSelectedEditor;
-        if (selected) {
-            (selected.constructor as unknown as { updateDefaultParams(type: number, value: unknown): void })
+        const selected = this.selectedEditors();
+        const editors = target.selected.filter((editor) => editor.parent);
+        const selectionKept = editors.length === selected.length && editors.every((editor) => selected.includes(editor));
+        if (selectionKept) {
+            // Changes the selected text boxes, or pdf.js' default if none is selected.
+            uiManager.updateParams(PARAM_FREETEXT_SIZE, size);
+            this.showFontSize(size);
+        } else {
+            // The selection has changed, e.g. by a click on another text box, which also ends
+            // the input in the toolbar. Leave the newly selected text boxes alone.
+            for (const editor of editors) editor.updateParams(PARAM_FREETEXT_SIZE, size);
+        }
+        const editor = editors[0] ?? selected[0];
+        if (editor) {
+            (editor.constructor as unknown as { updateDefaultParams(type: number, value: unknown): void })
                 .updateDefaultParams(PARAM_FREETEXT_SIZE, size);
         }
         TextboxTool.defaultFontSize = size;
-        this.showFontSize(size);
 
-        if (editing?.parent && !editing.isInEditMode()) {
-            editing.enableEditMode();
-            editing.editorDiv?.focus();
+        if (returnFocus && selectionKept) this.returnFocus(target);
+    }
+
+    /**
+     * Start entering a font size in the toolbar. Call it before the input takes the focus.
+     *
+     * Keeps the text box being typed into in edit mode while the input has the focus, like
+     * pdf.js does while the window is in the background. Otherwise pdf.js commits the text box
+     * on focusout, and FreeTextEditor.disableEditMode() takes the focus back from the input.
+     */
+    beginFontSizeInput(): FontSizeTarget {
+        const target = this.captureFontSizeTarget();
+        if (target.editing) target.editing._focusEventsAllowed = false;
+        return target;
+    }
+
+    /**
+     * End entering a font size in the toolbar: return the focus to the text box that was being
+     * typed into, or finish it like its focusout would have.
+     */
+    endFontSizeInput(target: FontSizeTarget, returnFocus: boolean) {
+        const { editing } = target;
+        if (!editing) return;
+
+        if (returnFocus && editing.parent) {
+            // pdf.js ignores this focusin: the text box is still selected and in edit mode.
+            this.returnFocus(target);
+            editing._focusEventsAllowed = true;
+            return;
+        }
+
+        editing._focusEventsAllowed = true;
+        if (editing.parent && editing.isInEditMode()) {
+            // Leave the focus where it went: FreeTextEditor.disableEditMode() focuses the text box.
+            const div = editing.div;
+            div.focus = () => {};
+            try {
+                editing.commitOrRemove();
+            } finally {
+                Reflect.deleteProperty(div, 'focus');
+            }
         }
     }
 
-    /** Remember the text box being typed into before a toolbar menu takes the focus. */
-    rememberActiveEditor() {
-        this.lastActiveEditor = this.activeEditor();
+    /** Put the text box that was being typed into back into edit mode, with the caret where it was. */
+    private returnFocus({ editing, range }: FontSizeTarget) {
+        const editorDiv = editing?.editorDiv;
+        if (!editing?.parent || !editorDiv) return;
+        // The toolbar buttons don't take the focus.
+        if (editorDiv.ownerDocument.activeElement === editorDiv) return;
+
+        if (!editing.isInEditMode()) editing.enableEditMode();
+        editorDiv.focus();
+        if (range && editorDiv.contains(range.startContainer) && editorDiv.contains(range.endContainer)) {
+            const selection = editorDiv.ownerDocument.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+        }
+    }
+
+    private selectedEditors(): TextEditor[] {
+        const uiManager = this.uiManager;
+        const pagesCount: number = this.pdfViewer?.pagesCount ?? 0;
+        const editors: TextEditor[] = [];
+        if (!uiManager) return editors;
+        for (let pageIndex = 0; pageIndex < pagesCount; pageIndex++) {
+            for (const editor of uiManager.getEditors(pageIndex)) {
+                if (uiManager.isSelected(editor)) editors.push(editor);
+            }
+        }
+        return editors;
     }
 
     private showFontSize(size: number) {
         this.fontSize = size;
         const el = this.child.toolbar?.toolbarLeftEl.querySelector('.' + TextboxTool.FONT_SIZE_CLS + ' .pdf-plus-textbox-font-size-value');
-        if (el) el.textContent = String(size);
+        // Don't overwrite a size being typed (e.g. when a click on another text box selects it
+        // before the input loses the focus); the input shows the current size when it's done.
+        if (el instanceof HTMLInputElement && el.ownerDocument.activeElement !== el) el.value = String(size);
     }
 
     /** Turn the tool off and save the text boxes. */

@@ -3,6 +3,7 @@ import { Menu, Platform, setIcon, setTooltip } from 'obsidian';
 import PDFPlus from 'main';
 import { PDFPlusComponent } from 'lib/component';
 import { ColorPalette } from 'color-palette';
+import { TextboxTool } from 'lib/textbox/tool';
 import { PDFToolbar, PDFViewerChild } from 'typings';
 import { showChildElOnParentElHover, showMenuUnderParentEl } from 'utils';
 import { ScrollMode, SpreadMode } from 'pdfjs-enums';
@@ -45,6 +46,8 @@ export class PDFPlusToolbar extends PDFPlusComponent {
         toolbar.toolbarLeftEl.querySelectorAll<HTMLElement>('div.clickable-icon')
             .forEach((buttonEl) => {
                 const iconEl = buttonEl.firstElementChild;
+                // Opening the font size presets on hover would take the keys typed into a text box.
+                if (buttonEl.closest('.' + TextboxTool.FONT_SIZE_CLS)) return;
                 if (iconEl && iconEl.matches('svg.lucide-chevron-down')) {
                     let childMenu: Menu | null = null;
 
