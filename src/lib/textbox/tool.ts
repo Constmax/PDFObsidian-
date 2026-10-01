@@ -88,6 +88,8 @@ export class TextboxTool extends PDFPlusComponent {
     fontSize = TextboxTool.defaultFontSize;
     /** Whether the current pointer gesture started inside a text box. */
     private gestureInTextbox = false;
+    /** Stops keeping the caret, see keepCaret(). */
+    private releaseCaret: (() => void) | null = null;
 
     constructor(plugin: PDFPlus, child: PDFViewerChild) {
         super(plugin);
@@ -125,6 +127,7 @@ export class TextboxTool extends PDFPlusComponent {
     }
 
     onunload() {
+        this.releaseCaret?.();
         // Called from PDFViewerChild.unload() before the viewer is torn down, so the document
         // is still alive. `drafts.save()` captures the drafts synchronously before its first await.
         this.drafts.save()
@@ -271,15 +274,50 @@ export class TextboxTool extends PDFPlusComponent {
         const editorDiv = editing?.editorDiv;
         if (!editing?.parent || !editorDiv) return;
         // The toolbar buttons don't take the focus.
-        if (editorDiv.ownerDocument.activeElement === editorDiv) return;
-
-        if (!editing.isInEditMode()) editing.enableEditMode();
-        editorDiv.focus();
-        if (range && editorDiv.contains(range.startContainer) && editorDiv.contains(range.endContainer)) {
-            const selection = editorDiv.ownerDocument.getSelection();
-            selection?.removeAllRanges();
-            selection?.addRange(range);
+        if (editorDiv.ownerDocument.activeElement !== editorDiv) {
+            if (!editing.isInEditMode()) editing.enableEditMode();
+            editorDiv.focus();
+            if (range && editorDiv.contains(range.startContainer) && editorDiv.contains(range.endContainer)) {
+                const selection = editorDiv.ownerDocument.getSelection();
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+            }
         }
+        this.keepCaret(editorDiv);
+    }
+
+    /**
+     * Keep the caret in the text box where it is now, until the user types or clicks.
+     *
+     * A new font size moves the text box, and pdf.js then moves its element in the DOM to keep
+     * the reading order (AnnotationEditorLayer.moveEditorInDOM, in a timeout; with more than one
+     * text box on the page, the element is always reinserted). That takes the focus from the
+     * text box. pdf.js focuses it again, but with the caret at the start.
+     */
+    private keepCaret(editorDiv: HTMLElement) {
+        this.releaseCaret?.();
+        const doc = editorDiv.ownerDocument;
+        const selection = doc.getSelection();
+        if (!selection?.rangeCount) return;
+        // Not the Range itself: it collapses when its nodes leave the DOM.
+        const { startContainer, startOffset, endContainer, endOffset } = selection.getRangeAt(0);
+        if (!editorDiv.contains(startContainer) || !editorDiv.contains(endContainer)) return;
+
+        const restore = () => {
+            if (!editorDiv.contains(startContainer) || !editorDiv.contains(endContainer)) return;
+            doc.getSelection()?.setBaseAndExtent(startContainer, startOffset, endContainer, endOffset);
+        };
+        const win = doc.win;
+        const release = () => {
+            editorDiv.removeEventListener('focus', restore);
+            win.removeEventListener('keydown', release, true);
+            win.removeEventListener('pointerdown', release, true);
+            if (this.releaseCaret === release) this.releaseCaret = null;
+        };
+        editorDiv.addEventListener('focus', restore);
+        win.addEventListener('keydown', release, true);
+        win.addEventListener('pointerdown', release, true);
+        this.releaseCaret = release;
     }
 
     private selectedEditors(): TextEditor[] {
