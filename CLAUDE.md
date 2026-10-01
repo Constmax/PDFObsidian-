@@ -10,10 +10,11 @@ This is a fork of [PDF++](https://github.com/RyotaUshio/obsidian-pdf-plus) (Obsi
 npm run build      # tsc -noEmit type check + esbuild production bundle -> main.js
 npm run dev        # esbuild watch mode, inline sourcemaps
 npm run lint       # eslint src/
+npm test           # vitest: unit tests in tests/
 ```
 
 - The lockfile is `pnpm-lock.yaml` (upstream uses pnpm); `npm run …` works as well.
-- There are no automated tests. Changes are verified by loading the plugin in Obsidian.
+- Unit tests (`tests/`) only cover code that runs without Obsidian, so far `ViewerLifecycle`; the `obsidian` package has no runtime, so `tests/obsidian-stub.ts` stands in for `Component`/`Events`. Everything else is verified by loading the plugin in Obsidian.
 - To try a build, copy `main.js` and `styles.css` into a vault's `.obsidian/plugins/pdf-plus/`, then reload Obsidian (or toggle the plugin). The test vault is `../PDF++Test`.
 - Claude Code cloud sessions: `.claude/hooks/session-start.sh` runs `pnpm install` and installs a pinned Obsidian (`scripts/cloud/install-obsidian.sh`, version via `OBSIDIAN_VERSION`) to `/opt/obsidian/current`: the app in `app/`, the unpacked `obsidian.asar` in `src/` (its pdf.js is in `src/lib/pdfjs/`). To verify a change there, use `node scripts/cloud/obsidian-dev.mjs start|reload|open|screenshot|eval|stop`: it builds, runs the plugin in a headless Obsidian with the `test-vault/` fixture and drives it over CDP (details in the `obsidian-dev` skill, `.claude/skills/obsidian-dev/SKILL.md`).
 - In the Obsidian dev console the plugin instance is available as the global `pdfPlus`.
@@ -29,7 +30,14 @@ npm run lint       # eslint src/
 
 **Entry point** `src/main.ts` (`PDFPlus extends Plugin`): loads settings, creates `DomManager`, patches Obsidian, registers commands/events. `this.lib` (`src/lib/index.ts`, `PDFPlusLib`) is the central API object; its submodules (`commands`, `copyLink`, `highlight`, `workspace`, `composer`, `writer`, …) extend `PDFPlusLibSubmodule` and reach each other through `this.lib`. UI pieces extend `PDFPlusComponent` (an Obsidian `Component` with `plugin`/`lib`/`settings` getters).
 
-**Monkey-patching** (`src/patchers/`, via `monkey-around`): PDF++ has no viewer of its own; it patches Obsidian's built-in PDF view. `patchPDFView` / `patchPDFInternalFromPDFEmbed` are retried until an instance exists (`tryPatchUntilSuccess`), and `pdf-internals.ts` patches the prototypes of `PDFViewerComponent` and `PDFViewerChild`. Most per-viewer features (toolbar, color palette, backlink visualizer, text box tool, double-click word selection) are attached in the patched `PDFViewerChild` load hook and live on the child object (`child.palette`, `child.textbox`, …; typed in `src/typings.d.ts`). Toolbars are rebuilt on DOM updates without unloading the old instance, so toolbar code removes stale elements itself.
+**Monkey-patching** (`src/patchers/`, via `monkey-around`): PDF++ has no viewer of its own; it patches Obsidian's built-in PDF view. `patchPDFView` / `patchPDFInternalFromPDFEmbed` are retried until an instance exists (`tryPatchUntilSuccess`), and `pdf-internals.ts` patches the prototypes of `PDFViewerComponent` and `PDFViewerChild`. Per-viewer objects live on the child (`child.palette`, `child.textbox`, `child.bib`, …; typed in `src/typings.d.ts`); the backlink visualizer lives on the `PDFViewerComponent` (`component.visualizer`) and is a child of the plugin.
+
+**Viewer lifecycle** (`src/lib/viewer-lifecycle.ts`): every `PDFViewerChild` gets a `ViewerLifecycle` as `child.component` (a child of the plugin, removed when the viewer unloads). It has three scopes, each an Obsidian `Component` whose registrations end with it:
+- the lifecycle itself lives as long as the viewer (`viewer` hook; e.g. the text box tool, whose drafts must survive reloads);
+- `document` lives as long as the loaded file and is replaced on every `loadFile`. Every write to a PDF reloads its viewers, so anything registered once per file load must go here, or it piles up (`document` hook; `loadFile` in `pdf-internals.ts` registers its handlers on `documentScope`);
+- the toolbar scope is replaced whenever the toolbar is set up again, on every `'update-dom'` (`toolbar` hook; `PDFPlusToolbar`, the text box button).
+
+Per-viewer features are `ViewerFeature`s listed in `src/lib/viewer-features.ts` (the text box tool's is in `src/lib/textbox/feature.ts`); add new ones there rather than to the patches. `lib.registerPDFEvent(name, eventBus, scope, cb, { once: true })` registers a pdf.js event handler that ends with a scope (a `null` scope means "once, never unregistered otherwise").
 
 **Two kinds of annotations**:
 - *Backlink highlights* (the default, upstream's main feature): links in Markdown notes like `[[file.pdf#page=1&selection=…&color=…]]` are indexed and drawn over the text layer (`backlink-visualizer.ts`, `lib/pdf-backlink-index.ts`). Nothing is written to the PDF. A text selection is encoded as text-layer node index + offset (`lib/copy-link.ts` `getTextSelectionRange`); selections whose boundaries are not inside `.textLayerNode` elements can't be encoded, and actions silently do nothing.

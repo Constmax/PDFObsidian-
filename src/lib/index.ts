@@ -86,11 +86,13 @@ export class PDFPlusLib {
 
     /** 
      * @param component A component such that the callback is unregistered when the component is unloaded, or `null` if the callback should be called only once.
+     * @param options.once Unregister the callback after its first call, also when a `component` is given.
      */
-    registerPDFEvent<K extends keyof PDFJsEventMap>(name: K, eventBus: EventBus, component: Component | null, callback: (data: PDFJsEventMap[K]) => any) {
+    registerPDFEvent<K extends keyof PDFJsEventMap>(name: K, eventBus: EventBus, component: Component | null, callback: (data: PDFJsEventMap[K]) => any, options?: { once?: boolean }) {
+        const once = !component || !!options?.once;
         const listener = async (data: any) => {
             await callback(data);
-            if (!component) eventBus.off(name, listener);
+            if (once) eventBus.off(name, listener);
         };
         component?.register(() => eventBus.off(name, listener));
         eventBus.on(name, listener);
