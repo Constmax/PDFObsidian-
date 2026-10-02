@@ -58,3 +58,17 @@ Per-viewer features are `ViewerFeature`s listed in `src/lib/viewer-features.ts` 
 
 - Always stick to Obsidian's built-in PDF viewer.
 - Avoid plugin-dependent artifacts unless they bring a massive benefit and don't leave a mess once the plugin is removed.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues of `Constmax/PDFObsidian-` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (created lazily). See `docs/agents/domain.md`.
