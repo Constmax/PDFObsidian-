@@ -94,6 +94,9 @@ export default class PDFPlus extends Plugin {
 		this.addIcons();
 
 		await loadPdfJs();
+		// pdf.js turns images dropped anywhere in the window or pasted into a PDF into stamp annotations,
+		// which can't be saved here (drafts lose their bitmap). Its stamp editor accepts only these MIME types.
+		window.pdfjsLib.SupportedImageMimeTypes.length = 0;
 
 		await this.loadSettings();
 		await this.saveSettings();
