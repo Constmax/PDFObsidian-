@@ -1,4 +1,5 @@
 import { Notice } from 'obsidian';
+import { around } from 'monkey-around';
 
 import PDFPlus from 'main';
 import { PDFPlusComponent } from 'lib/component';
@@ -14,13 +15,18 @@ const EDITOR_MODE_FREETEXT = 3;
 /** Value of pdf.js' `AnnotationEditorParamsType.FREETEXT_SIZE`. */
 const PARAM_FREETEXT_SIZE = 11;
 
+/** Short sides of A4 and A3 pages, in PDF points. */
+const A4_SHORT_SIDE = 595;
+const A3_SHORT_SIDE = 842;
+
 /** How long to wait for pdf.js to switch the editor mode. */
 const MODE_SWITCH_TIMEOUT_MS = 2000;
 
 /** The parts of pdf.js' annotation editor API used here. pdf-dist doesn't type them. */
 interface EditorLayer {
     div: HTMLElement;
-    createAndAddNewEditor(point: { offsetX: number, offsetY: number }, isCentered: boolean): TextEditor | null;
+    pageDimensions: [number, number];
+    createAndAddNewEditor(point: { offsetX: number, offsetY: number }, isCentered: boolean, params?: { fontSize?: number }): TextEditor | null;
 }
 
 interface UIManager {
@@ -40,6 +46,7 @@ interface TextEditor {
     editorDiv?: HTMLElement;
     /** While false, pdf.js ignores focusin/focusout of the editor. */
     _focusEventsAllowed: boolean;
+    propertiesToUpdate: [number, unknown][];
     isInEditMode(): boolean;
     enableEditMode(): void;
     commitOrRemove(): void;
@@ -99,6 +106,7 @@ export class TextboxTool extends PDFPlusComponent {
 
     onload() {
         patchTextboxResizing(this.plugin);
+        patchNewEditorFontSize(this.plugin);
 
         // Capture phase: runs before pdf.js' handlers and before the event reaches the text layer.
         this.registerDomEvent(this.child.containerEl, 'pointerdown', (evt) => {
@@ -118,7 +126,11 @@ export class TextboxTool extends PDFPlusComponent {
             // Dispatched when a text box is selected, with its properties.
             this.lib.registerPDFEvent('annotationeditorparamschanged', eventBus, this, ({ details }) => {
                 const size = details.find(([type]) => type === PARAM_FREETEXT_SIZE)?.[1];
-                if (typeof size === 'number') this.showFontSize(size);
+                if (typeof size !== 'number') return;
+                // pdf.js doesn't say which text box the size is from. Without a selection, it is
+                // pdf.js' default, which is kept at the shown size (see setFontSize()).
+                const editor = this.selectedEditors().find((editor) => fontSizeOf(editor) === size);
+                this.showFontSize(Math.round(size / fontScale(editor?.parent) * 10) / 10);
             });
             this.lib.registerPDFEvent('annotationeditorstateschanged', eventBus, this, ({ details }) => {
                 if (details.hasSelectedEditor === false) this.showFontSize(TextboxTool.defaultFontSize);
@@ -208,21 +220,21 @@ export class TextboxTool extends PDFPlusComponent {
 
         const selected = this.selectedEditors();
         const editors = target.selected.filter((editor) => editor.parent);
+        // The selection may have changed, e.g. by a click on another text box, which also ends
+        // the input in the toolbar. Then the newly selected text boxes are left alone.
         const selectionKept = editors.length === selected.length && editors.every((editor) => selected.includes(editor));
-        if (selectionKept) {
-            // Changes the selected text boxes, or pdf.js' default if none is selected.
-            uiManager.updateParams(PARAM_FREETEXT_SIZE, size);
-            this.showFontSize(size);
-        } else {
-            // The selection has changed, e.g. by a click on another text box, which also ends
-            // the input in the toolbar. Leave the newly selected text boxes alone.
-            for (const editor of editors) editor.updateParams(PARAM_FREETEXT_SIZE, size);
-        }
+        // Each text box gets the size for its own page, so uiManager.updateParams() (one value
+        // for all) can't change them. pdf.js' default is kept at the shown size; new text boxes
+        // get the size for their page from patchNewEditorFontSize().
+        for (const editor of editors) editor.updateParams(PARAM_FREETEXT_SIZE, size * fontScale(editor.parent));
         const editor = editors[0] ?? selected[0];
         if (editor) {
             (editor.constructor as unknown as { updateDefaultParams(type: number, value: unknown): void })
                 .updateDefaultParams(PARAM_FREETEXT_SIZE, size);
+        } else {
+            uiManager.updateParams(PARAM_FREETEXT_SIZE, size);
         }
+        if (selectionKept) this.showFontSize(size);
         TextboxTool.defaultFontSize = size;
 
         if (returnFocus && selectionKept) this.returnFocus(target);
@@ -427,6 +439,46 @@ export class TextboxTool extends PDFPlusComponent {
         editor.enableEditMode();
         editor.editorDiv?.focus();
     }
+}
+
+/**
+ * Factor from the font size shown in the toolbar to the one written into the PDF.
+ *
+ * Scanned PDFs often have pages far larger than any paper size (e.g. 2800 x 4000 pt), on which
+ * an 8 pt text box looks tiny. On pages larger than A3, the shown size is relative to an A4 page.
+ */
+function fontScale(layer: EditorLayer | null | undefined): number {
+    if (!layer) return 1;
+    const shortSide = Math.min(...layer.pageDimensions);
+    return shortSide > A3_SHORT_SIDE ? shortSide / A4_SHORT_SIDE : 1;
+}
+
+/** Font size of a text box in the PDF. */
+function fontSizeOf(editor: TextEditor): unknown {
+    return editor.propertiesToUpdate.find(([type]) => type === PARAM_FREETEXT_SIZE)?.[1];
+}
+
+let layerPatched = false;
+
+/**
+ * Give new text boxes the font size for their page: those placed by a click and those pdf.js
+ * creates itself (Enter or Space on a page). Idempotent; undone when the plugin unloads.
+ */
+function patchNewEditorFontSize(plugin: PDFPlus) {
+    if (layerPatched) return;
+    const AnnotationEditorLayer = (window.pdfjsLib as any)?.AnnotationEditorLayer;
+    if (!AnnotationEditorLayer) return;
+    layerPatched = true;
+
+    plugin.register(around(AnnotationEditorLayer.prototype, {
+        // Also used for other editor types; only the FreeText editor reads `fontSize`.
+        createAndAddNewEditor(old) {
+            return function (this: EditorLayer, point: unknown, isCentered: boolean, params: object = {}) {
+                return old.call(this, point, isCentered, { fontSize: TextboxTool.defaultFontSize * fontScale(this), ...params });
+            };
+        },
+    }));
+    plugin.register(() => layerPatched = false);
 }
 
 /**
