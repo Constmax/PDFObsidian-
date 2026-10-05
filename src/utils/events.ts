@@ -271,7 +271,7 @@ export function registerDoubleClickWordSelection(component: Component, el: HTMLE
 
 /**
  * Select the word of a text layer at the given point and return its range.
- * Leaves the selection untouched and returns null if the point is not on a text layer.
+ * Leaves the selection untouched and returns null if the point is not on a word of a text layer.
  */
 function selectWordAtPoint(doc: Document, selection: Selection, x: number, y: number): Range | null {
     let range: Range | null = null;
@@ -293,18 +293,23 @@ function selectWordAtPoint(doc: Document, selection: Selection, x: number, y: nu
     const textLayerEl = nodeEl?.closest('.textLayer');
     if (!textLayerEl) return null;
 
+    // Selection.modify() works on the selection, so it has to be replaced to find the word.
+    const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+
     selection.removeAllRanges();
     selection.addRange(range);
 
     selection.modify('move', 'backward', 'word');
     selection.modify('extend', 'forward', 'word');
 
-    if (!selection.rangeCount) return null;
-    const word = clampRangeToTextLayerNodes(doc, textLayerEl, selection.getRangeAt(0));
-    if (!word) return null;
+    const word = selection.rangeCount ? clampRangeToTextLayerNodes(doc, textLayerEl, selection.getRangeAt(0)) : null;
 
     selection.removeAllRanges();
-    selection.addRange(word);
+    if (word) {
+        selection.addRange(word);
+    } else if (anchorNode && focusNode) {
+        selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+    }
     return word;
 }
 
@@ -313,6 +318,10 @@ function selectWordAtPoint(doc: Document, selection: Selection, x: number, y: nu
  *
  * Word selection may put a boundary next to a textLayerNode, e.g. at a line break, and PDF++
  * can't convert such a selection to a text range: highlighting it would silently do nothing.
+ *
+ * It may also put a boundary on a textLayerNode element itself, e.g. `(span, 0)` at the start of
+ * the item after a footnote number. PDF++ counts the offset of such a boundary as characters and
+ * adds the whole text of the span, so the highlight would cover the entire next item.
  */
 function clampRangeToTextLayerNodes(doc: Document, textLayerEl: Element, range: Range): Range | null {
     const textNodes: Text[] = [];
@@ -327,14 +336,13 @@ function clampRangeToTextLayerNodes(doc: Document, textLayerEl: Element, range: 
     if (!first || !last) return null;
 
     const clamped = range.cloneRange();
-    if (!isInTextLayerNode(range.startContainer)) clamped.setStart(first, 0);
-    if (!isInTextLayerNode(range.endContainer)) clamped.setEnd(last, last.length);
+    if (!isTextInTextLayerNode(range.startContainer)) clamped.setStart(first, 0);
+    if (!isTextInTextLayerNode(range.endContainer)) clamped.setEnd(last, last.length);
     return clamped.collapsed ? null : clamped;
 }
 
-function isInTextLayerNode(node: Node) {
-    const el = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-    return !!el?.closest('.textLayerNode');
+function isTextInTextLayerNode(node: Node) {
+    return node.nodeType === Node.TEXT_NODE && !!node.parentElement?.closest('.textLayerNode');
 }
 
 export function selectTrippleClickedTextLayerNode(evt: MouseEvent) {
