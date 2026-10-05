@@ -288,9 +288,7 @@ function selectWordAtPoint(doc: Document, selection: Selection, x: number, y: nu
 
     if (!range) return null;
 
-    const node = range.startContainer;
-    const nodeEl = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-    const textLayerEl = nodeEl?.closest('.textLayer');
+    const textLayerEl = closestTextLayer(range.startContainer);
     if (!textLayerEl) return null;
 
     // Selection.modify() works on the selection, so it has to be replaced to find the word.
@@ -354,14 +352,24 @@ export function clampSelectionToTextLayerNodes(doc: Document) {
     const range = selection.getRangeAt(0);
     if (isTextInTextLayerNode(range.startContainer) && isTextInTextLayerNode(range.endContainer)) return;
 
-    const container = range.commonAncestorContainer;
-    const textLayerEl = (container.nodeType === Node.ELEMENT_NODE ? container as Element : container.parentElement)?.closest('.textLayer');
+    const textLayerEl = closestTextLayer(range.commonAncestorContainer);
     if (!textLayerEl) return;
 
     const clamped = clampRangeToTextLayerNodes(doc, textLayerEl, range);
     if (!clamped) return;
-    selection.removeAllRanges();
-    selection.addRange(clamped);
+
+    // Keep the direction of the drag.
+    const backward = selection.anchorNode === range.endContainer && selection.anchorOffset === range.endOffset;
+    if (backward) {
+        selection.setBaseAndExtent(clamped.endContainer, clamped.endOffset, clamped.startContainer, clamped.startOffset);
+    } else {
+        selection.setBaseAndExtent(clamped.startContainer, clamped.startOffset, clamped.endContainer, clamped.endOffset);
+    }
+}
+
+function closestTextLayer(node: Node) {
+    const el = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+    return el?.closest('.textLayer') ?? null;
 }
 
 function isTextInTextLayerNode(node: Node) {
