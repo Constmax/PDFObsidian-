@@ -694,6 +694,48 @@ body.pdf-plus-vim-hint-inverted {
 }
 
 /*
+ * pdf.js' draw layer (from its pdf_viewer.css). In editing mode pdf.js leaves highlights and
+ * ink out of the canvas and draws them as SVGs in .canvasWrapper; without these rules they
+ * end up below the page and existing highlights vanish while the text box tool is on.
+ * Unscoped like in pdf.js: only pdf.js puts SVGs into .canvasWrapper. The hover/selection
+ * outline rules are left out on purpose, since highlights are only shown, never edited, here.
+ */
+.canvasWrapper svg {
+    transform: none;
+}
+
+.canvasWrapper svg.highlight {
+    position: absolute;
+    mix-blend-mode: multiply;
+}
+
+.canvasWrapper svg.highlight:not(.free) {
+    fill-rule: evenodd;
+}
+
+.canvasWrapper svg.draw {
+    position: absolute;
+    mix-blend-mode: normal;
+}
+
+.canvasWrapper svg.highlightOutline {
+    position: absolute;
+    fill: none;
+}
+
+.canvasWrapper svg:is(.highlight, .highlightOutline)[data-main-rotation="90"] :is(mask, use:not(.clip, .mask)) {
+    transform: matrix(0, 1, -1, 0, 1, 0);
+}
+
+.canvasWrapper svg:is(.highlight, .highlightOutline)[data-main-rotation="180"] :is(mask, use:not(.clip, .mask)) {
+    transform: matrix(-1, 0, 0, -1, 1, 1);
+}
+
+.canvasWrapper svg:is(.highlight, .highlightOutline)[data-main-rotation="270"] :is(mask, use:not(.clip, .mask)) {
+    transform: matrix(0, -1, 1, 0, 0, 1);
+}
+
+/*
  * Text boxes (pdf.js' FreeText editor, see src/lib/textbox/tool.ts).
  * Obsidian ships none of pdf.js' annotation editor styles.
  */
