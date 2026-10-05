@@ -341,6 +341,29 @@ function clampRangeToTextLayerNodes(doc: Document, textLayerEl: Element, range: 
     return clamped.collapsed ? null : clamped;
 }
 
+/**
+ * Fix up the current selection after the user has finished it: a drag over several lines can end
+ * (or start) on a line break, the text layer itself or `.endOfContent` instead of inside a
+ * textLayerNode, and PDF++ can't convert such a selection to a text range.
+ * Selections that already have both boundaries in text, or that span pages, are left alone.
+ */
+export function clampSelectionToTextLayerNodes(doc: Document) {
+    const selection = doc.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const range = selection.getRangeAt(0);
+    if (isTextInTextLayerNode(range.startContainer) && isTextInTextLayerNode(range.endContainer)) return;
+
+    const container = range.commonAncestorContainer;
+    const textLayerEl = (container.nodeType === Node.ELEMENT_NODE ? container as Element : container.parentElement)?.closest('.textLayer');
+    if (!textLayerEl) return;
+
+    const clamped = clampRangeToTextLayerNodes(doc, textLayerEl, range);
+    if (!clamped) return;
+    selection.removeAllRanges();
+    selection.addRange(clamped);
+}
+
 function isTextInTextLayerNode(node: Node) {
     return node.nodeType === Node.TEXT_NODE && !!node.parentElement?.closest('.textLayerNode');
 }
