@@ -288,9 +288,7 @@ function selectWordAtPoint(doc: Document, selection: Selection, x: number, y: nu
 
     if (!range) return null;
 
-    const node = range.startContainer;
-    const nodeEl = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-    const textLayerEl = nodeEl?.closest('.textLayer');
+    const textLayerEl = closestTextLayer(range.startContainer);
     if (!textLayerEl) return null;
 
     // Selection.modify() works on the selection, so it has to be replaced to find the word.
@@ -339,6 +337,39 @@ function clampRangeToTextLayerNodes(doc: Document, textLayerEl: Element, range: 
     if (!isTextInTextLayerNode(range.startContainer)) clamped.setStart(first, 0);
     if (!isTextInTextLayerNode(range.endContainer)) clamped.setEnd(last, last.length);
     return clamped.collapsed ? null : clamped;
+}
+
+/**
+ * Fix up the current selection after the user has finished it: a drag over several lines can end
+ * (or start) on a line break, the text layer itself or `.endOfContent` instead of inside a
+ * textLayerNode, and PDF++ can't convert such a selection to a text range.
+ * Selections that already have both boundaries in text, or that span pages, are left alone.
+ */
+export function clampSelectionToTextLayerNodes(doc: Document) {
+    const selection = doc.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const range = selection.getRangeAt(0);
+    if (isTextInTextLayerNode(range.startContainer) && isTextInTextLayerNode(range.endContainer)) return;
+
+    const textLayerEl = closestTextLayer(range.commonAncestorContainer);
+    if (!textLayerEl) return;
+
+    const clamped = clampRangeToTextLayerNodes(doc, textLayerEl, range);
+    if (!clamped) return;
+
+    // Keep the direction of the drag.
+    const backward = selection.anchorNode === range.endContainer && selection.anchorOffset === range.endOffset;
+    if (backward) {
+        selection.setBaseAndExtent(clamped.endContainer, clamped.endOffset, clamped.startContainer, clamped.startOffset);
+    } else {
+        selection.setBaseAndExtent(clamped.startContainer, clamped.startOffset, clamped.endContainer, clamped.endOffset);
+    }
+}
+
+function closestTextLayer(node: Node) {
+    const el = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+    return el?.closest('.textLayer') ?? null;
 }
 
 function isTextInTextLayerNode(node: Node) {

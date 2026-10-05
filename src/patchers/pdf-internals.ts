@@ -11,7 +11,7 @@ import { patchPDFOutlineViewer } from 'patchers';
 import { PDFViewerBacklinkVisualizer } from 'backlink-visualizer';
 import { ViewerLifecycle } from 'lib/viewer-lifecycle';
 import { viewerFeatures } from 'lib/viewer-features';
-import { camelCaseToKebabCase, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
+import { camelCaseToKebabCase, clampSelectionToTextLayerNodes, getCharactersWithBoundingBoxesInPDFCoords, getTextLayerInfo, hookInternalLinkMouseEventHandlers, isEmbed, isModifierName, isNonEmbedLike, registerDoubleClickWordSelection, selectTrippleClickedTextLayerNode, showChildElOnParentElHover } from 'utils';
 import { AnnotationElement, PDFOutlineViewer, PDFViewerComponent, PDFViewerChild, PDFSearchSettings, Rect, PDFAnnotationHighlight, PDFTextHighlight, PDFRectHighlight, ObsidianViewer, PDFPageView } from 'typings';
 import { SidebarView, SpreadMode } from 'pdfjs-enums';
 import { VimBindings } from 'vim/vim';
@@ -224,6 +224,7 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     const onPointerUp = (evt: PointerEvent) => {
                         updateIsModEvent(evt);
 
+                        clampSelectionToTextLayerNodes(doc);
                         if (plugin.obsidianHasTextSelectionBug && plugin.settings.fixObsidianTextSelectionBug) {
                             fixTextSelection(evt);
                         }
