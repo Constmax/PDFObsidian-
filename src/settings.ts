@@ -152,6 +152,7 @@ export interface PDFPlusSettings {
 	alwaysRecordHistory: boolean;
 	renderMarkdownInStickyNote: boolean;
 	enablePDFEdit: boolean;
+	textboxTextLayer: boolean;
 	author: string;
 	writeHighlightToFileOpacity: number;
 	defaultWriteFileToggle: boolean;
@@ -427,6 +428,7 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	alwaysRecordHistory: true,
 	renderMarkdownInStickyNote: false,
 	enablePDFEdit: false,
+	textboxTextLayer: true,
 	author: '',
 	writeHighlightToFileOpacity: 0.2,
 	defaultWriteFileToggle: false,
@@ -1656,6 +1658,9 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					const inputEl = (setting.components[0] as TextComponent).inputEl;
 					inputEl.toggleClass('error', !inputEl.value);
 				});
+			this.addToggleSetting('textboxTextLayer')
+				.setName('Write text box text into the text layer')
+				.setDesc('When saving text boxes, also add their text to the page as invisible text, like an OCR layer, so that it can be searched, selected and copied.');
 			// this.addToggleSetting('enableEditEncryptedPDF')
 			// .setName('Enable editing encrypted PDF files');
 		}
