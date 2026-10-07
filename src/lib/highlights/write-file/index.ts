@@ -68,8 +68,7 @@ export class AnnotationWriteFileLib extends PDFPlusLibSubmodule {
             if (pageView?.textLayer && pageView.div.dataset.loaded) {
                 const textLayerInfo = getTextLayerInfo(pageView.textLayer);
                 if (textLayerInfo) {
-                    const results = this.lib.highlight.geometry.computeMergedHighlightRects(textLayerInfo, beginIndex, beginOffset, endIndex, endOffset);
-                    const rects = results.map(({ rect, angle }) => ({ rect, angle }));
+                    const rects = this.lib.highlight.geometry.computeMergedHighlightRects(textLayerInfo, beginIndex, beginOffset, endIndex, endOffset);
                     let annotationID;
                     try {
                         annotationID = await annotator(child.file, pageNumber, rects);

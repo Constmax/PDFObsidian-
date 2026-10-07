@@ -5,7 +5,7 @@ import { PDFPlusLibSubmodule } from 'lib/submodule';
 import { formatAnnotationID, getBorderRadius, hexToRgb } from 'utils';
 import { DestArray } from 'typings';
 import { IPdfIo, TextMarkupAnnotationSubtype } from '.';
-import { RotatedRect, boundingRect, corners } from '../rotation';
+import { RotatedRect, boundingRect, corners, rotate } from '../rotation';
 
 
 export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
@@ -42,10 +42,8 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
                 CA: subtype === 'Highlight' ? opacity : 1.0,
                 Border: subtype === 'Highlight' ? [borderRadius, borderRadius, 0] : undefined,
                 C: color,
-                // pdf.js draws highlights from the bounding boxes of the quads, so tilted ones need their own appearance
-                AP: subtype === 'Highlight' && rects.some((rect) => rect.angle)
-                    ? { N: this.addHighlightAppearance(pdfDoc, rects, color, opacity) }
-                    : undefined,
+                // pdf.js draws text markups from the bounding boxes of the quads, so tilted ones need their own appearance
+                AP: rects.some((rect) => rect.angle) ? this.addTiltedAppearance(pdfDoc, subtype, rects, color, opacity) : undefined,
             });
 
             const annotationID = formatAnnotationID(ref.objectNumber, ref.generationNumber);
@@ -87,23 +85,40 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
         });
     }
 
-    /** A highlight appearance stream like the one pdf.js writes, with each rect drawn as its rotated quad. */
-    addHighlightAppearance(pdfDoc: PDFDocument, rects: RotatedRect[], color: number[], opacity: number): PDFRef {
-        const n = (x: number) => x.toFixed(3);
-        const quads = rects.map((rect) => {
-            const [ltx, lty, rtx, rty, lbx, lby, rbx, rby] = corners(rect).map(n);
-            return `${ltx} ${lty} m ${rtx} ${rty} l ${rbx} ${rby} l ${lbx} ${lby} l h`;
-        });
-        const content = [`${color.map(n).join(' ')} rg`, '/R0 gs', ...quads, 'f'].join('\n');
+    /**
+     * An appearance like the default one pdf.js draws for highlights and underlines, but following the rotated quads.
+     * Returns undefined for the other subtypes, which keep pdf.js' default appearance.
+     */
+    addTiltedAppearance(pdfDoc: PDFDocument, subtype: TextMarkupAnnotationSubtype, rects: RotatedRect[], color: number[], opacity: number) {
+        const fmt = (x: number) => x.toFixed(3);
+        let content, resources;
+        if (subtype === 'Highlight') {
+            const quads = rects.map((rect) => {
+                const [ltx, lty, rtx, rty, lbx, lby, rbx, rby] = corners(rect).map(fmt);
+                return `${ltx} ${lty} m ${rtx} ${rty} l ${rbx} ${rby} l ${lbx} ${lby} l h`;
+            });
+            content = [`${color.map(fmt).join(' ')} rg`, '/R0 gs', ...quads, 'f'];
+            // pdf.js only uses an existing highlight appearance if it has an ExtGState
+            resources = { ExtGState: { R0: { Type: 'ExtGState', BM: 'Multiply', ca: opacity } } };
+        } else if (subtype === 'Underline') {
+            // like pdf.js: a 0.571 wide line 1.3 above the bottom of each quad
+            const lines = rects.map(({ rect: [left, bottom, right], angle }) => {
+                const [x1, y1, x2, y2] = [...rotate(left, bottom + 1.3, angle), ...rotate(right, bottom + 1.3, angle)].map(fmt);
+                return `${x1} ${y1} m ${x2} ${y2} l`;
+            });
+            content = [`${color.map(fmt).join(' ')} RG`, '[] 0 d 0.571 w', ...lines, 'S'];
+        } else {
+            return undefined;
+        }
         const context = pdfDoc.context;
-        return context.register(context.stream(content, {
+        const stream = context.register(context.stream(content.join('\n'), {
             Type: 'XObject',
             Subtype: 'Form',
             FormType: 1,
             BBox: boundingRect(rects),
-            // pdf.js only uses an existing highlight appearance if it has an ExtGState
-            Resources: { ExtGState: { R0: { Type: 'ExtGState', BM: 'Multiply', ca: opacity } } },
+            Resources: resources,
         }));
+        return { N: stream };
     }
 
     async process<T>(file: TFile, fn: (pdfDoc: PDFDocument) => T) {

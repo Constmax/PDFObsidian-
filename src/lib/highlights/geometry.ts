@@ -66,15 +66,15 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
     computeHighlightRectForItem(item: TextContentItem, textDiv: HTMLElement, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): RotatedRect | null {
         const angle = textAngle(item.transform);
         // If the item has the `chars` property filled, use it to get the bounding rectangle of each character in the item.
-        // The char rects are axis-aligned, so this only fits unrotated text.
-        const rect = !angle && item.chars && item.chars.length >= item.str.length
-            ? this.computeHighlightRectForItemFromChars(item as PropRequired<TextContentItem, 'chars'>, index, beginIndex, beginOffset, endIndex, endOffset)
+        const rect = item.chars && item.chars.length >= item.str.length
+            ? this.computeHighlightRectForItemFromChars(item as PropRequired<TextContentItem, 'chars'>, angle, index, beginIndex, beginOffset, endIndex, endOffset)
             // Otherwise, use the text layer divs to get the bounding rectangle of the text selection.
             : this.computeHighlightRectForItemFromTextLayer(item, textDiv, angle, index, beginIndex, beginOffset, endIndex, endOffset);
         return rect && { rect, angle };
     }
 
-    computeHighlightRectForItemFromChars(item: PropRequired<TextContentItem, 'chars'>, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
+    /** Returns the rect in the frame rotated by `angle`, the rotation of the item. */
+    computeHighlightRectForItemFromChars(item: PropRequired<TextContentItem, 'chars'>, angle: number, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
         // trim `item.chars` so that it will match `item.str`, which is already trimmed
         const trimmedChars = item.chars.slice(
             item.chars.findIndex((char) => char.c === item.str.charAt(0)),
@@ -89,13 +89,11 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
 
         if (offsetFrom > trimmedChars.length - 1 || offsetTo < 0) return null;
 
-        const charFrom = trimmedChars[offsetFrom];
-        const charTo = trimmedChars[offsetTo];
+        // The char rects are axis-aligned boxes around the (possibly tilted) glyphs; bring them into the item's frame.
+        const charFrom = rectInFrame({ rect: trimmedChars[offsetFrom].r, angle: 0 }, angle);
+        const charTo = rectInFrame({ rect: trimmedChars[offsetTo].r, angle: 0 }, angle);
         // the minimum rectangle that contains all the chars of this text content item
-        return [
-            Math.min(charFrom.r[0], charTo.r[0]), Math.min(charFrom.r[1], charTo.r[1]),
-            Math.max(charFrom.r[2], charTo.r[2]), Math.max(charFrom.r[3], charTo.r[3]),
-        ];
+        return this.mergeRectangles(charFrom, charTo);
     }
 
     /** Returns the rect in the frame rotated by `angle`, the rotation of the item. */

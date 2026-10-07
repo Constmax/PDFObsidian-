@@ -7,7 +7,7 @@ import type { Rect } from 'typings';
  */
 export type RotatedRect = { rect: Rect, angle: number };
 
-// ponytail: only slight tilts count as rotated; steeper text (e.g. vertical) keeps the axis-aligned rects,
+// Only slight tilts count as rotated; steeper text (e.g. vertical) keeps the axis-aligned rects,
 // because the text layer measurements in geometry.ts assume a near-horizontal text div.
 const MAX_ANGLE = 10 * Math.PI / 180;
 const MIN_ANGLE = 1e-3;
