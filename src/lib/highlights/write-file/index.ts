@@ -4,7 +4,8 @@ import PDFPlus from 'main';
 import { PdfLibIO } from './pdf-lib';
 import { PDFPlusLibSubmodule } from 'lib/submodule';
 import { getTextLayerInfo } from 'utils';
-import { DestArray, PDFViewerChild, Rect } from 'typings';
+import { DestArray, PDFViewerChild } from 'typings';
+import { RotatedRect } from '../rotation';
 
 
 export type TextMarkupAnnotationSubtype = 'Highlight' | 'Underline' | 'Squiggly' | 'StrikeOut';
@@ -67,8 +68,7 @@ export class AnnotationWriteFileLib extends PDFPlusLibSubmodule {
             if (pageView?.textLayer && pageView.div.dataset.loaded) {
                 const textLayerInfo = getTextLayerInfo(pageView.textLayer);
                 if (textLayerInfo) {
-                    const results = this.lib.highlight.geometry.computeMergedHighlightRects(textLayerInfo, beginIndex, beginOffset, endIndex, endOffset);
-                    const rects = results.map(({ rect }) => rect);
+                    const rects = this.lib.highlight.geometry.computeMergedHighlightRects(textLayerInfo, beginIndex, beginOffset, endIndex, endOffset);
                     let annotationID;
                     try {
                         annotationID = await annotator(child.file, pageNumber, rects);
@@ -104,9 +104,9 @@ export interface IPdfIo {
      * @returns A promise resolving to the ID of the newly created annotation. The annotation must be a highlight annotation 
      * containing the given rectangles "grouped" using quadpoints.
      */
-    addHighlightAnnotation(file: TFile, pageNumber: number, rects: Rect[], colorName?: string, contents?: string): Promise<string>;
-    addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: Rect[], subtype: 'Highlight' | 'Underline' | 'Squiggly' | 'StrikeOut', colorName?: string, contents?: string): Promise<string>
-    addLinkAnnotation(file: TFile, pageNumber: number, rects: Rect[], dest: DestArray | string, colorName?: string, contents?: string): Promise<string>;
+    addHighlightAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], colorName?: string, contents?: string): Promise<string>;
+    addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], subtype: 'Highlight' | 'Underline' | 'Squiggly' | 'StrikeOut', colorName?: string, contents?: string): Promise<string>
+    addLinkAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], dest: DestArray | string, colorName?: string, contents?: string): Promise<string>;
     deleteAnnotation(file: TFile, pageNumber: number, id: string): Promise<void>;
     getAnnotationContents(file: TFile, pageNumber: number, id: string): Promise<string | null>;
     setAnnotationContents(file: TFile, pageNumber: number, id: string, contents: string): Promise<void>;
@@ -116,4 +116,4 @@ export interface IPdfIo {
  * @returns A promise resolving to the ID of the newly created annotation. The annotation must be a highlight annotation 
  * containing the given rectangles "grouped" using quadpoints.
  */
-export type Annotator = (file: TFile, page: number, rects: Rect[]) => Promise<string>;
+export type Annotator = (file: TFile, page: number, rects: RotatedRect[]) => Promise<string>;

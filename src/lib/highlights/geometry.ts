@@ -1,9 +1,11 @@
 import { PDFPlusLibSubmodule } from 'lib/submodule';
 import { getNodeAndOffsetOfTextPos, PropRequired } from 'utils';
 import { Rect, TextContentItem } from 'typings';
+import { RotatedRect, corners, rectInFrame, rotate, textAngle } from './rotation';
 
 
-export type MergedRect = { rect: Rect, indices: number[] };
+/** `rect` is in the frame of the text's rotation `angle`; see `RotatedRect`. */
+export type MergedRect = RotatedRect & { indices: number[] };
 
 export class HighlightGeometryLib extends PDFPlusLibSubmodule {
 
@@ -17,7 +19,7 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
 
         const results: MergedRect[] = [];
 
-        let mergedRect: Rect | null = null;
+        let mergedRect: RotatedRect | null = null;
         let mergedIndices: number[] = [];
 
         // If the selection ends at the beginning of a text content item, 
@@ -41,12 +43,14 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
                 mergedRect = rect;
                 mergedIndices = [index];
             } else {
-                const mergeable = this.areRectanglesMergeable(mergedRect, rect);
+                // compare and merge in the frame of the line so far
+                const rectInMergedFrame = rectInFrame(rect, mergedRect.angle);
+                const mergeable = this.areRectanglesMergeable(mergedRect.rect, rectInMergedFrame);
                 if (mergeable) {
-                    mergedRect = this.mergeRectangles(mergedRect, rect);
+                    mergedRect = { rect: this.mergeRectangles(mergedRect.rect, rectInMergedFrame), angle: mergedRect.angle };
                     mergedIndices.push(index);
                 } else {
-                    results.push({ rect: mergedRect, indices: mergedIndices });
+                    results.push({ ...mergedRect, indices: mergedIndices });
 
                     mergedRect = rect;
                     mergedIndices = [index];
@@ -54,21 +58,23 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
             }
         }
 
-        if (mergedRect) results.push({ rect: mergedRect, indices: mergedIndices });
+        if (mergedRect) results.push({ ...mergedRect, indices: mergedIndices });
 
         return results;
     }
 
-    computeHighlightRectForItem(item: TextContentItem, textDiv: HTMLElement, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
+    computeHighlightRectForItem(item: TextContentItem, textDiv: HTMLElement, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): RotatedRect | null {
+        const angle = textAngle(item.transform);
         // If the item has the `chars` property filled, use it to get the bounding rectangle of each character in the item.
-        if (item.chars && item.chars.length >= item.str.length) {
-            return this.computeHighlightRectForItemFromChars(item as PropRequired<TextContentItem, 'chars'>, index, beginIndex, beginOffset, endIndex, endOffset);
-        }
-        // Otherwise, use the text layer divs to get the bounding rectangle of the text selection.
-        return this.computeHighlightRectForItemFromTextLayer(item, textDiv, index, beginIndex, beginOffset, endIndex, endOffset);
+        const rect = item.chars && item.chars.length >= item.str.length
+            ? this.computeHighlightRectForItemFromChars(item as PropRequired<TextContentItem, 'chars'>, angle, index, beginIndex, beginOffset, endIndex, endOffset)
+            // Otherwise, use the text layer divs to get the bounding rectangle of the text selection.
+            : this.computeHighlightRectForItemFromTextLayer(item, textDiv, angle, index, beginIndex, beginOffset, endIndex, endOffset);
+        return rect && { rect, angle };
     }
 
-    computeHighlightRectForItemFromChars(item: PropRequired<TextContentItem, 'chars'>, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
+    /** Returns the rect in the frame rotated by `angle`, the rotation of the item. */
+    computeHighlightRectForItemFromChars(item: PropRequired<TextContentItem, 'chars'>, angle: number, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
         // trim `item.chars` so that it will match `item.str`, which is already trimmed
         const trimmedChars = item.chars.slice(
             item.chars.findIndex((char) => char.c === item.str.charAt(0)),
@@ -83,21 +89,19 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
 
         if (offsetFrom > trimmedChars.length - 1 || offsetTo < 0) return null;
 
-        const charFrom = trimmedChars[offsetFrom];
-        const charTo = trimmedChars[offsetTo];
+        // The char rects are axis-aligned boxes around the (possibly tilted) glyphs; bring them into the item's frame.
+        const charFrom = rectInFrame({ rect: trimmedChars[offsetFrom].r, angle: 0 }, angle);
+        const charTo = rectInFrame({ rect: trimmedChars[offsetTo].r, angle: 0 }, angle);
         // the minimum rectangle that contains all the chars of this text content item
-        return [
-            Math.min(charFrom.r[0], charTo.r[0]), Math.min(charFrom.r[1], charTo.r[1]),
-            Math.max(charFrom.r[2], charTo.r[2]), Math.max(charFrom.r[3], charTo.r[3]),
-        ];
+        return this.mergeRectangles(charFrom, charTo);
     }
 
-    computeHighlightRectForItemFromTextLayer(item: TextContentItem, textDiv: HTMLElement, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
+    /** Returns the rect in the frame rotated by `angle`, the rotation of the item. */
+    computeHighlightRectForItemFromTextLayer(item: TextContentItem, textDiv: HTMLElement, angle: number, index: number, beginIndex: number, beginOffset: number, endIndex: number, endOffset: number): Rect | null {
         // the bounding box of the whole text content item
-        const x1 = item.transform[4];
-        const y1 = item.transform[5];
-        const x2 = item.transform[4] + item.width;
-        const y2 = item.transform[5] + item.height;
+        const [x1, y1] = rotate(item.transform[4], item.transform[5], -angle);
+        const x2 = x1 + item.width;
+        const y2 = y1 + item.height;
 
         const range = textDiv.doc.createRange();
 
@@ -126,11 +130,14 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
         const rect = range.getBoundingClientRect();
         const parentRect = textDiv.getBoundingClientRect();
 
+        // The client rects of a rotated text div are axis-aligned boxes around the tilted text:
+        // their vertical extent varies along the line, so use the item's height;
+        // their horizontal extent is close enough for slight tilts.
         return [
             x1 + (rect.left - parentRect.left) / parentRect.width * item.width,
-            y1 + (rect.bottom - parentRect.bottom) / parentRect.height * item.height,
+            angle ? y1 : y1 + (rect.bottom - parentRect.bottom) / parentRect.height * item.height,
             x2 - (parentRect.right - rect.right) / parentRect.width * item.width,
-            y2 - (parentRect.top - rect.top) / parentRect.height * item.height,
+            angle ? y2 : y2 - (parentRect.top - rect.top) / parentRect.height * item.height,
         ];
     }
 
@@ -179,11 +186,11 @@ export class HighlightGeometryLib extends PDFPlusLibSubmodule {
         ];
     }
 
-    rectsToQuadPoints(rects: Rect[]): number[] {
+    rectsToQuadPoints(rects: RotatedRect[]): number[] {
         // Surprisingly enough, the PDF specification states a wrong order for the quadpoints!!
         // https://stackoverflow.com/questions/9855814/pdf-spec-vs-acrobat-creation-quadpoints
         // It says each rectangle is described as "left-bottom, right-bottom, right-top, left-top,"
         // but in reality it is "left-top, right-top, left-bottom, right-bottom."
-        return rects.flatMap(([left, bottom, right, top]) => [left, top, right, top, left, bottom, right, bottom]);
+        return rects.flatMap(corners);
     }
 } 

@@ -2,6 +2,7 @@ import { Component } from 'obsidian';
 
 import { PDFPlusLibSubmodule } from 'lib/submodule';
 import { PDFPageView, PDFViewerChild, Rect } from 'typings';
+import { rotate } from './rotation';
 
 
 /** Adding text highlight in PDF viewers without writing into files */
@@ -14,7 +15,18 @@ export class ViewerHighlightLib extends PDFPlusLibSubmodule {
             });
     }
 
-    placeRectInPage(rect: Rect, page: PDFPageView) {
+    /** @param angle The rotation of the frame `rect` is in; see `RotatedRect`. */
+    placeRectInPage(rect: Rect, page: PDFPageView, angle = 0): HTMLElement {
+        if (angle) {
+            // Place the unrotated rect around the center of the rotated one, then rotate it there.
+            // The layer's y axis points down, so the rotation flips.
+            const [cx, cy] = rotate((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2, angle);
+            const w = (rect[2] - rect[0]) / 2, h = (rect[3] - rect[1]) / 2;
+            const rectEl = this.placeRectInPage([cx - w, cy - h, cx + w, cy + h], page);
+            rectEl.setCssStyles({ transform: `rotate(${-angle}rad)` });
+            return rectEl;
+        }
+
         const viewBox = page.pdfPage.view;
         const pageX = viewBox[0];
         const pageY = viewBox[1];
