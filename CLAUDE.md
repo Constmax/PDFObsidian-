@@ -14,7 +14,7 @@ npm test           # vitest: unit tests in tests/
 ```
 
 - The lockfile is `pnpm-lock.yaml` (upstream uses pnpm); `npm run …` works as well.
-- Unit tests (`tests/`) only cover code that runs without Obsidian, so far `ViewerLifecycle`; the `obsidian` package has no runtime, so `tests/obsidian-stub.ts` stands in for `Component`/`Events`. Everything else is verified by loading the plugin in Obsidian.
+- Unit tests (`tests/`) only cover code that runs without Obsidian, so far `ViewerLifecycle` and the text box text layer; the `obsidian` package has no runtime, so `tests/obsidian-stub.ts` stands in for `Component`/`Events`. Everything else is verified by loading the plugin in Obsidian.
 - To try a build, copy `main.js` and `styles.css` into a vault's `.obsidian/plugins/pdf-plus/`, then reload Obsidian (or toggle the plugin). The test vault is `../PDF++Test`.
 - Claude Code cloud sessions: `.claude/hooks/session-start.sh` runs `pnpm install` and installs a pinned Obsidian (`scripts/cloud/install-obsidian.sh`, version via `OBSIDIAN_VERSION`) to `/opt/obsidian/current`: the app in `app/`, the unpacked `obsidian.asar` in `src/` (its pdf.js is in `src/lib/pdfjs/`). To verify a change there, use `node scripts/cloud/obsidian-dev.mjs start|reload|open|screenshot|eval|stop`: it builds, runs the plugin in a headless Obsidian with the `test-vault/` fixture and drives it over CDP (details in the `obsidian-dev` skill, `.claude/skills/obsidian-dev/SKILL.md`).
 - In the Obsidian dev console the plugin instance is available as the global `pdfPlus`.

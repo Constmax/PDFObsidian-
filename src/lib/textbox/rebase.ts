@@ -43,7 +43,7 @@ export interface AnnotationStyle {
 export const STYLE_KEYS = ['color', 'fontSize', 'opacity', 'thickness', 'rotation', 'comment'] as const;
 
 /** `AnnotationType.FREETEXT` in pdf.js. */
-const FREETEXT = 3;
+export const FREETEXT = 3;
 
 /** pdf.js' worker only treats annotation storage entries whose key starts with this as editors to save. */
 export const EDITOR_KEY_PREFIX = 'pdfjs_internal_editor_';

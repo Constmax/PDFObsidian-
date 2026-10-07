@@ -2,11 +2,10 @@ import { Notice, TFile } from 'obsidian';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 
 import { PDFPlusLib } from 'lib';
-import { PDFDraftSource } from 'lib/pdf-write-coordinator';
+import { PDFDraftSource, toArrayBuffer } from 'lib/pdf-write-coordinator';
 import { PDFViewerChild } from 'typings';
-import { toArrayBuffer } from 'lib/pdf-write-coordinator';
 import { syncTextBoxTextLayer } from './text-layer';
-import { AnnotationStyle, Draft, DraftBase, EDITOR_KEY_PREFIX, STYLE_KEYS, SerializedEditor, applyDrafts, normalizeColor } from './rebase';
+import { AnnotationStyle, Draft, DraftBase, EDITOR_KEY_PREFIX, FREETEXT, STYLE_KEYS, SerializedEditor, applyDrafts, normalizeColor } from './rebase';
 
 
 /**
@@ -56,7 +55,8 @@ export class PDFViewerDrafts implements PDFDraftSource {
             new Notice(`${this.lib.plugin.manifest.name}: ${result.report.rescuedAsNew} edited annotation(s) had been changed or removed by someone else. Your version was saved as a new annotation.`, 10000);
         }
         // Text boxes also go into the text layer. Only when one was saved or deleted, since this rewrites the file with pdf-lib.
-        if (this.lib.plugin.settings.textboxTextLayer && this.applying.some((draft) => draft.data.annotationType === FREETEXT)) {
+        // A deleted editor serializes without `annotationType`; its base still has it.
+        if (this.lib.plugin.settings.textboxTextLayer && this.applying.some((draft) => (draft.base?.annotationType ?? draft.data.annotationType) === FREETEXT)) {
             const doc = await this.lib.loadPdfLibDocumentFromArrayBuffer(result.data);
             await syncTextBoxTextLayer(doc);
             return toArrayBuffer(await doc.save());
@@ -157,7 +157,6 @@ export class PDFViewerDrafts implements PDFDraftSource {
 }
 
 /** `AnnotationEditorType`s in pdf.js; they equal the corresponding `AnnotationType`s. */
-const FREETEXT = 3;
 const HIGHLIGHT = 9;
 const INK = 15;
 

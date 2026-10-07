@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { PDFDocument, PDFHexString, PDFName, PDFString } from '@cantoo/pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFPage, PDFString } from '@cantoo/pdf-lib';
 
 import { syncTextBoxTextLayer } from '../src/lib/textbox/text-layer';
 
+
+function fonts(page: PDFPage) {
+    return page.node.Resources()!.lookup(PDFName.of('Font'), PDFDict);
+}
 
 async function docWithTextBox(contents: string, rotate = 0) {
     const doc = await PDFDocument.create();
@@ -41,14 +45,34 @@ describe('syncTextBoxTextLayer', () => {
         await syncTextBoxTextLayer(doc);
         expect(layerStreams(doc)).toHaveLength(1);
 
-        doc.context.lookup(annot, Object as any);
         (doc.context.lookup(annot) as any).set(PDFName.of('Contents'), PDFHexString.fromText('neu'));
         await syncTextBoxTextLayer(doc);
         expect(layerStreams(doc)).toHaveLength(1);
 
         page.node.delete(PDFName.of('Annots'));
         await syncTextBoxTextLayer(doc);
-        expect(page.node.normalizedEntries().Contents!.size()).toBe(0);
+        expect(layerStreams(doc)).toHaveLength(0);
+        expect(fonts(page).get(PDFName.of('PDFPlusTL'))).toBeUndefined();
+    });
+
+    it('registers the font under the name the stream uses, once', async () => {
+        const { doc, page } = await docWithTextBox('x');
+        await syncTextBoxTextLayer(doc);
+        await syncTextBoxTextLayer(doc);
+        expect(layerStreams(doc)[0]).toContain('/PDFPlusTL 12 Tf');
+        expect(fonts(page).keys().map(String)).toEqual(['/PDFPlusTL']);
+    });
+
+    it('leaves the existing page content as it is', async () => {
+        const { doc, page } = await docWithTextBox('x');
+        const content = doc.context.register(doc.context.stream('0 0 m 10 10 l S'));
+        page.node.set(PDFName.of('Contents'), content);
+        const other = doc.addPage();
+        other.node.set(PDFName.of('Contents'), content);
+
+        for (let i = 0; i < 3; i++) await syncTextBoxTextLayer(doc);
+        expect((page.node.Contents() as PDFArray).asArray()).toEqual([expect.anything(), content]);
+        expect(other.node.get(PDFName.of('Contents'))).toBe(content);
     });
 
     it('turns the lines with the page rotation', async () => {
