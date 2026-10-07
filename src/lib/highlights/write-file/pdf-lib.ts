@@ -3,13 +3,14 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumb
 
 import { PDFPlusLibSubmodule } from 'lib/submodule';
 import { formatAnnotationID, getBorderRadius, hexToRgb } from 'utils';
-import { Rect, DestArray } from 'typings';
+import { DestArray } from 'typings';
 import { IPdfIo, TextMarkupAnnotationSubtype } from '.';
+import { RotatedRect, boundingRect, corners } from '../rotation';
 
 
 export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
 
-    async addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: Rect[], subtype: TextMarkupAnnotationSubtype, colorName?: string, contents?: string) {
+    async addTextMarkupAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], subtype: TextMarkupAnnotationSubtype, colorName?: string, contents?: string) {
         if (!this.plugin.settings.author) {
             throw new Error('The annotation author is not set. Please set it in the plugin settings.');
         }
@@ -17,6 +18,8 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
         return await this.process(file, (pdfDoc) => {
             const page = pdfDoc.getPage(pageNumber - 1);
             const { r, g, b } = this.plugin.domManager.getRgb(colorName);
+            const color = [r / 255, g / 255, b / 255];
+            const opacity = this.plugin.settings.writeHighlightToFileOpacity;
             const borderRadius = getBorderRadius();
             const geometry = this.lib.highlight.geometry;
 
@@ -29,16 +32,20 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
             // - 12.5.6.10 "Text Markup Annotations".
             const ref = this.addAnnotation(page, {
                 Subtype: subtype,
-                Rect: geometry.mergeRectangles(...rects),
+                Rect: boundingRect(rects),
                 QuadPoints: geometry.rectsToQuadPoints(rects),
                 // For Contents & T, make sure to pass a PDFString, not a raw string!!
                 // https://github.com/Hopding/pdf-lib/issues/555#issuecomment-670243166
                 Contents: PDFHexString.fromText(contents ?? ''),
                 M: PDFString.fromDate(new Date()),
                 T: PDFHexString.fromText(this.plugin.settings.author),
-                CA: subtype === 'Highlight' ? this.plugin.settings.writeHighlightToFileOpacity : 1.0,
+                CA: subtype === 'Highlight' ? opacity : 1.0,
                 Border: subtype === 'Highlight' ? [borderRadius, borderRadius, 0] : undefined,
-                C: [r / 255, g / 255, b / 255],
+                C: color,
+                // pdf.js draws highlights from the bounding boxes of the quads, so tilted ones need their own appearance
+                AP: subtype === 'Highlight' && rects.some((rect) => rect.angle)
+                    ? { N: this.addHighlightAppearance(pdfDoc, rects, color, opacity) }
+                    : undefined,
             });
 
             const annotationID = formatAnnotationID(ref.objectNumber, ref.generationNumber);
@@ -46,11 +53,11 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
         });
     }
     
-    async addHighlightAnnotation(file: TFile, pageNumber: number, rects: Rect[], colorName?: string, contents?: string) {
+    async addHighlightAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], colorName?: string, contents?: string) {
         return await this.addTextMarkupAnnotation(file, pageNumber, rects, 'Highlight', colorName, contents);
     }
 
-    async addLinkAnnotation(file: TFile, pageNumber: number, rects: Rect[], dest: DestArray | string, colorName?: string, contents?: string) {
+    async addLinkAnnotation(file: TFile, pageNumber: number, rects: RotatedRect[], dest: DestArray | string, colorName?: string, contents?: string) {
         return await this.process(file, (pdfDoc) => {
             const page = pdfDoc.getPage(pageNumber - 1);
             const rgb = hexToRgb(this.plugin.settings.pdfLinkColor);
@@ -67,7 +74,7 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
 
             const ref = this.addAnnotation(page, {
                 Subtype: 'Link',
-                Rect: geometry.mergeRectangles(...rects),
+                Rect: boundingRect(rects),
                 QuadPoints: geometry.rectsToQuadPoints(rects),
                 Dest,
                 M: PDFString.fromDate(new Date()),
@@ -78,6 +85,25 @@ export class PdfLibIO extends PDFPlusLibSubmodule implements IPdfIo {
             const annotationID = formatAnnotationID(ref.objectNumber, ref.generationNumber);
             return annotationID;
         });
+    }
+
+    /** A highlight appearance stream like the one pdf.js writes, with each rect drawn as its rotated quad. */
+    addHighlightAppearance(pdfDoc: PDFDocument, rects: RotatedRect[], color: number[], opacity: number): PDFRef {
+        const n = (x: number) => x.toFixed(3);
+        const quads = rects.map((rect) => {
+            const [ltx, lty, rtx, rty, lbx, lby, rbx, rby] = corners(rect).map(n);
+            return `${ltx} ${lty} m ${rtx} ${rty} l ${rbx} ${rby} l ${lbx} ${lby} l h`;
+        });
+        const content = [`${color.map(n).join(' ')} rg`, '/R0 gs', ...quads, 'f'].join('\n');
+        const context = pdfDoc.context;
+        return context.register(context.stream(content, {
+            Type: 'XObject',
+            Subtype: 'Form',
+            FormType: 1,
+            BBox: boundingRect(rects),
+            // pdf.js only uses an existing highlight appearance if it has an ExtGState
+            Resources: { ExtGState: { R0: { Type: 'ExtGState', BM: 'Multiply', ca: opacity } } },
+        }));
     }
 
     async process<T>(file: TFile, fn: (pdfDoc: PDFDocument) => T) {

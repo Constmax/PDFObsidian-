@@ -8,6 +8,7 @@ import { MultiValuedMap, getTextLayerInfo, isCanvas, isEmbed, isHoverPopover, is
 import { onBacklinkVisualizerContextMenu } from 'context-menu';
 import { BidirectionalMultiValuedMap } from 'utils';
 import { MergedRect } from 'lib/highlights/geometry';
+import { corners } from 'lib/highlights/rotation';
 
 
 export class PDFBacklinkVisualizer extends PDFPlusComponent {
@@ -424,8 +425,8 @@ export class PDFViewerBacklinkVisualizer extends PDFBacklinkVisualizer implement
         const rects = this.rectangleCache.getRectsForSelection(pageNumber, id);
         if (!rects) return;
 
-        for (const { rect, indices } of rects) {
-            const rectEl = this.lib.highlight.viewer.placeRectInPage(rect, pageView);
+        for (const { rect, angle, indices } of rects) {
+            const rectEl = this.lib.highlight.viewer.placeRectInPage(rect, pageView, angle);
             rectEl.addClasses(['pdf-plus-backlink', 'pdf-plus-backlink-selection']);
 
             // font-size is used to set the padding of this highlight in em unit
@@ -442,9 +443,10 @@ export class PDFViewerBacklinkVisualizer extends PDFBacklinkVisualizer implement
         }
 
         if (this.settings.showBacklinkIconForSelection) {
-            const lastRect = rects.last()?.rect;
+            const lastRect = rects.last();
             if (lastRect) {
-                const iconEl = this.showIcon(lastRect[2], lastRect[3], pageView);
+                const [, , right, top] = corners(lastRect);
+                const iconEl = this.showIcon(right, top, pageView);
                 for (const cache of caches) {
                     cacheToDoms.addValue(cache, iconEl);
                 }

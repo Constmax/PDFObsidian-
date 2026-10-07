@@ -4,6 +4,7 @@ import { PDFPlusLibSubmodule } from './submodule';
 import { PDFPlusTemplateProcessor } from 'template';
 import { encodeLinktext, getOffsetInTextLayerNode, getTextLayerInfo, getTextLayerNode, paramsToSubpath, parsePDFSubpath, subpathToParams } from 'utils';
 import { Canvas, PDFOutlineTreeNode, PDFViewerChild, Rect } from 'typings';
+import { boundingRect } from './highlights/rotation';
 import { ColorPalette } from 'color-palette';
 
 
@@ -396,12 +397,9 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
                         this.copyLinkToAnnotationWithGivenTextAndFile(text, file, child, false, templates, page, annotationID, `${r}, ${g}, ${b}`, autoPaste);
 
                         // TODO: Needs refactor
-                        if (rects) {
-                            const left = Math.min(...rects.map((rect) => rect[0]));
-                            const top = Math.max(...rects.map((rect) => rect[3]));
-                            if (typeof left === 'number' && typeof top === 'number') {
-                                this.plugin.lastCopiedDestInfo = { file, destArray: [page - 1, 'XYZ', left, top, null] };
-                            }
+                        if (rects?.length) {
+                            const [left, , , top] = boundingRect(rects);
+                            this.plugin.lastCopiedDestInfo = { file, destArray: [page - 1, 'XYZ', left, top, null] };
                         }
                     }, 300);
                 });
