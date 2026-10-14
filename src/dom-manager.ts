@@ -34,10 +34,16 @@ export class DomManager extends PDFPlusComponent {
 		this.updateStyleEl();
 
 		this.updateClass('pdf-plus-click-embed-to-open-link', this.settings.dblclickEmbedToOpenLink);
-		this.updateClass('pdf-plus-backlink-selection-highlight', this.settings.selectionBacklinkVisualizeStyle === 'highlight');
-		this.updateClass('pdf-plus-backlink-selection-underline', this.settings.selectionBacklinkVisualizeStyle === 'underline');
+		this.updateSelectionBacklinkStyle();
+		this.register(() => document.body.removeClass('pdf-plus-backlink-selection-highlight', 'pdf-plus-backlink-selection-underline'));
 
 		this.app.workspace.trigger('css-change');
+	}
+
+	updateSelectionBacklinkStyle() {
+		const style = this.settings.selectionBacklinkVisualizeStyle;
+		document.body.toggleClass('pdf-plus-backlink-selection-highlight', style === 'highlight');
+		document.body.toggleClass('pdf-plus-backlink-selection-underline', style === 'underline');
 	}
 
 	updateClass(className: string, condition: boolean) {

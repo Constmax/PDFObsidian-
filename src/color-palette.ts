@@ -46,6 +46,7 @@ export class ColorPalette extends PDFPlusComponent {
         this.actionMenuEl = null;
         this.displayTextFormatMenuEl = null;
         this.writeFileButtonEl = null;
+        this.styleButtonEl = null;
         this.cropButtonEl = null;
         this.statusContainerEl = null;
         this.statusEl = null;
@@ -297,7 +298,6 @@ export class ColorPalette extends PDFPlusComponent {
 
         this.writeFileButtonEl = paletteEl.createDiv('clickable-icon', (el) => {
             setIcon(el, 'lucide-edit');
-            setTooltip(el, `Add ${this.plugin.settings.selectionBacklinkVisualizeStyle}s to file directly`);
             el.toggleClass('is-disabled', !this.lib.isEditable(this.child));
 
             let shown = false;
@@ -362,6 +362,7 @@ export class ColorPalette extends PDFPlusComponent {
                 shown = true;
             });
         });
+        this.updateWriteFileTooltip();
 
         if (this.cropButtonEl) {
             paletteEl.insertAfter(this.writeFileButtonEl, this.cropButtonEl);
@@ -373,27 +374,36 @@ export class ColorPalette extends PDFPlusComponent {
     /** Switches between highlight and underline (the "Highlight style" setting) for all viewers. */
     addStyleToggle(paletteEl: HTMLElement) {
         this.styleButtonEl = paletteEl.createDiv('clickable-icon', (el) => {
-            el.addEventListener('click', () => {
+            el.addEventListener('click', async () => {
                 const settings = this.plugin.settings;
                 settings.selectionBacklinkVisualizeStyle = settings.selectionBacklinkVisualizeStyle === 'highlight' ? 'underline' : 'highlight';
-                this.plugin.saveSettings();
-                // Same classes as DomManager.onload; a full loadStyle() would rebuild the palettes and reset their state.
-                document.body.toggleClass('pdf-plus-backlink-selection-highlight', settings.selectionBacklinkVisualizeStyle === 'highlight');
-                document.body.toggleClass('pdf-plus-backlink-selection-underline', settings.selectionBacklinkVisualizeStyle === 'underline');
-                ColorPalette.elInstanceMap.forEach((palette) => palette.updateStyleToggle());
+                // Not loadStyle(): it would rebuild the palettes and reset their state.
+                this.plugin.domManager.updateSelectionBacklinkStyle();
+                ColorPalette.elInstanceMap.forEach((palette) => {
+                    palette.updateStyleButton();
+                    palette.updateWriteFileTooltip();
+                    palette.updateTooltips();
+                });
+                try {
+                    await this.plugin.saveSettings();
+                } catch (err) {
+                    console.error(err);
+                    new Notice(`${this.plugin.manifest.name}: Failed to save the highlight style.`);
+                }
             });
         });
-        this.updateStyleToggle();
+        this.updateStyleButton();
     }
 
-    updateStyleToggle() {
+    updateStyleButton() {
+        if (!this.styleButtonEl) return;
         const style = this.plugin.settings.selectionBacklinkVisualizeStyle;
-        if (this.styleButtonEl) {
-            setIcon(this.styleButtonEl, style === 'highlight' ? 'lucide-highlighter' : 'lucide-underline');
-            setTooltip(this.styleButtonEl, `Style: ${style} (click to switch to ${style === 'highlight' ? 'underline' : 'highlight'})`);
-        }
-        if (this.writeFileButtonEl) setTooltip(this.writeFileButtonEl, `Add ${style}s to file directly`);
-        this.updateTooltips();
+        setIcon(this.styleButtonEl, style === 'highlight' ? 'lucide-highlighter' : 'lucide-underline');
+        setTooltip(this.styleButtonEl, `Style: ${style} (click to switch to ${style === 'highlight' ? 'underline' : 'highlight'})`);
+    }
+
+    updateWriteFileTooltip() {
+        if (this.writeFileButtonEl) setTooltip(this.writeFileButtonEl, `Add ${this.plugin.settings.selectionBacklinkVisualizeStyle}s to file directly`);
     }
 
     removeWriteFileToggle() {
