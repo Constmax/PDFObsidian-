@@ -23,6 +23,7 @@ export class ColorPalette extends PDFPlusComponent {
     actionMenuEl: HTMLElement | null;
     displayTextFormatMenuEl: HTMLElement | null;
     writeFileButtonEl: HTMLElement | null;
+    styleButtonEl: HTMLElement | null;
     cropButtonEl: HTMLElement | null;
     statusContainerEl: HTMLElement | null;
     statusEl: HTMLElement | null;
@@ -85,6 +86,8 @@ export class ColorPalette extends PDFPlusComponent {
         } else {
             this.addWriteFileToggle(this.paletteEl);
         }
+
+        this.addStyleToggle(this.paletteEl);
 
         this.statusContainerEl = this.paletteEl.createDiv('pdf-plus-color-palette-status-container');
         this.statusEl = this.statusContainerEl.createSpan('pdf-plus-color-palette-status');
@@ -365,6 +368,32 @@ export class ColorPalette extends PDFPlusComponent {
         }
 
         this.setWriteFile(this.writeFile);
+    }
+
+    /** Switches between highlight and underline (the "Highlight style" setting) for all viewers. */
+    addStyleToggle(paletteEl: HTMLElement) {
+        this.styleButtonEl = paletteEl.createDiv('clickable-icon', (el) => {
+            el.addEventListener('click', () => {
+                const settings = this.plugin.settings;
+                settings.selectionBacklinkVisualizeStyle = settings.selectionBacklinkVisualizeStyle === 'highlight' ? 'underline' : 'highlight';
+                this.plugin.saveSettings();
+                // Same classes as DomManager.onload; a full loadStyle() would rebuild the palettes and reset their state.
+                document.body.toggleClass('pdf-plus-backlink-selection-highlight', settings.selectionBacklinkVisualizeStyle === 'highlight');
+                document.body.toggleClass('pdf-plus-backlink-selection-underline', settings.selectionBacklinkVisualizeStyle === 'underline');
+                ColorPalette.elInstanceMap.forEach((palette) => palette.updateStyleToggle());
+            });
+        });
+        this.updateStyleToggle();
+    }
+
+    updateStyleToggle() {
+        const style = this.plugin.settings.selectionBacklinkVisualizeStyle;
+        if (this.styleButtonEl) {
+            setIcon(this.styleButtonEl, style === 'highlight' ? 'lucide-highlighter' : 'lucide-underline');
+            setTooltip(this.styleButtonEl, `Style: ${style} (click to switch to ${style === 'highlight' ? 'underline' : 'highlight'})`);
+        }
+        if (this.writeFileButtonEl) setTooltip(this.writeFileButtonEl, `Add ${style}s to file directly`);
+        this.updateTooltips();
     }
 
     removeWriteFileToggle() {
