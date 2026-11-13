@@ -7,6 +7,8 @@
 
 # npm
 node_modules
+# The lockfile is pnpm-lock.yaml; `npm install` would add a second one
+package-lock.json
 
 # Don't include the compiled main.js file in the repo.
 # They should be uploaded to GitHub releases instead.
