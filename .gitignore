@@ -7,6 +7,8 @@
 
 # npm
 node_modules
+# The lockfile is pnpm-lock.yaml; `npm install` would add a second one
+package-lock.json
 
 # Don't include the compiled main.js file in the repo.
 # They should be uploaded to GitHub releases instead.
@@ -28,3 +30,10 @@ anystyle/
 !test-vault/.obsidian/plugins/pdf-plus/data.json
 test-vault/.obsidian/plugins/pdf-plus/*.js
 test-vault/.obsidian/plugins/pdf-plus/*.css
+
+# macOS Finder duplicates ("file 2.ts"); only code, so "Lecture 2.pdf" can be a fixture
+* [0-9].ts
+* [0-9].js
+* [0-9].mjs
+* [0-9].css
+* [0-9].json
