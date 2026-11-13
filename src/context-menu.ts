@@ -609,6 +609,17 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
                         });
                     }
 
+                    const textbox = child.textbox;
+                    if (plugin.settings.enableAnnotationContentEdit && annot.data.subtype === 'FreeText' && textbox) {
+                        this.addItem((item) => {
+                            return item
+                                .setSection('modify-annotation')
+                                .setTitle('Edit text box')
+                                .setIcon('lucide-pencil')
+                                .onClick(() => textbox.edit(id));
+                        });
+                    }
+
                     if (plugin.settings.enableAnnotationDeletion) {
                         this.addItem((item) => {
                             return item

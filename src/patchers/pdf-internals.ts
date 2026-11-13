@@ -905,6 +905,19 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                             });
                         }
 
+                        // edit a text box in place, with the text box tool
+                        if (lib.isEditable(this)
+                            && plugin.settings.enableAnnotationContentEdit
+                            && annotationElement.data.subtype === 'FreeText'
+                            && this.textbox) {
+                            const textbox = this.textbox;
+                            iconContainerEl.createDiv('clickable-icon pdf-plus-edit-annotation', (editButtonEl) => {
+                                setIcon(editButtonEl, 'lucide-pencil');
+                                setTooltip(editButtonEl, 'Edit');
+                                editButtonEl.addEventListener('click', () => textbox.edit(id));
+                            });
+                        }
+
                         // add delete button
                         if (lib.isEditable(child) && plugin.settings.enableAnnotationDeletion) {
                             iconContainerEl.createDiv('clickable-icon pdf-plus-delete-annotation', (deleteButtonEl) => {
