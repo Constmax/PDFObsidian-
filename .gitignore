@@ -28,3 +28,6 @@ anystyle/
 !test-vault/.obsidian/plugins/pdf-plus/data.json
 test-vault/.obsidian/plugins/pdf-plus/*.js
 test-vault/.obsidian/plugins/pdf-plus/*.css
+
+# macOS Finder duplicates ("file 2.ts")
+* 2.*
