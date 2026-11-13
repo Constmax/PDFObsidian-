@@ -31,5 +31,9 @@ anystyle/
 test-vault/.obsidian/plugins/pdf-plus/*.js
 test-vault/.obsidian/plugins/pdf-plus/*.css
 
-# macOS Finder duplicates ("file 2.ts")
-* 2.*
+# macOS Finder duplicates ("file 2.ts"); only code, so "Lecture 2.pdf" can be a fixture
+* [0-9].ts
+* [0-9].js
+* [0-9].mjs
+* [0-9].css
+* [0-9].json
