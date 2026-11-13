@@ -38,6 +38,8 @@ interface UIManager {
 }
 
 interface TextEditor {
+    /** Id of the annotation the editor was created from, if any. */
+    annotationElementId: string | null;
     x: number;
     y: number;
     parent: EditorLayer | null;
@@ -93,6 +95,11 @@ export class TextboxTool extends PDFPlusComponent {
     active = false;
     /** Font size of the selected text box, or of new ones if none is selected. */
     fontSize = TextboxTool.defaultFontSize;
+    /**
+     * Whether the tool was started to edit one existing text box (see edit()). A click outside
+     * the text boxes then ends the tool instead of placing a new one.
+     */
+    private editing = false;
     /** Whether the current pointer gesture started inside a text box. */
     private gestureInTextbox = false;
     /** Stops keeping the caret, see keepCaret(). */
@@ -164,7 +171,27 @@ export class TextboxTool extends PDFPlusComponent {
         else await this.activate();
     }
 
-    async activate(): Promise<boolean> {
+    /**
+     * Start the tool and put the text box made from the annotation with the given id into edit
+     * mode. Clicking outside the text boxes then saves and ends the tool.
+     */
+    async edit(annotationId: string): Promise<boolean> {
+        if (this.active) return false;
+        this.child.destroyAnnotationPopup();
+        if (!await this.activate(annotationId)) return false;
+        this.editing = true;
+
+        // pdf.js selects the editor after the mode switch has reached the editor layers.
+        const found = await waitFor(() => this.selectedEditors().some((editor) => editor.annotationElementId === annotationId));
+        if (!found && this.active) {
+            new Notice(`${this.plugin.manifest.name}: This text box can't be edited.`);
+            await this.deactivate();
+            return false;
+        }
+        return true;
+    }
+
+    async activate(editId?: string): Promise<boolean> {
         if (this.active) return true;
 
         if (!this.lib.isEditable(this.child)) {
@@ -177,7 +204,8 @@ export class TextboxTool extends PDFPlusComponent {
 
         // The setter doesn't wait for the (async) mode switch; createAndAddNewEditor() returns
         // null until the new mode has reached the editor layers.
-        pdfViewer.annotationEditorMode = { mode: EDITOR_MODE_FREETEXT };
+        // With `editId`, pdf.js selects the editor of that annotation and puts it into edit mode.
+        pdfViewer.annotationEditorMode = { mode: EDITOR_MODE_FREETEXT, editId: editId ?? null };
         if (!await this.waitForMode(EDITOR_MODE_FREETEXT)) {
             new Notice(`${this.plugin.manifest.name}: Failed to start the text box tool.`);
             return false;
@@ -186,7 +214,8 @@ export class TextboxTool extends PDFPlusComponent {
         // pdf.js' default is global, but may have been reset by a new pdf.js instance.
         const uiManager = this.uiManager;
         if (uiManager && !uiManager.hasSelection) uiManager.updateParams(PARAM_FREETEXT_SIZE, TextboxTool.defaultFontSize);
-        this.showFontSize(TextboxTool.defaultFontSize);
+        // The text box to edit shows its own size once it is selected.
+        if (!editId) this.showFontSize(TextboxTool.defaultFontSize);
 
         this.setActive(true);
         return true;
@@ -376,19 +405,17 @@ export class TextboxTool extends PDFPlusComponent {
 
     private setActive(active: boolean) {
         this.active = active;
+        if (!active) this.editing = false;
         this.child.containerEl.toggleClass('pdf-plus-textbox-active', active);
         this.child.toolbar?.toolbarLeftEl.querySelector('.' + TextboxTool.BUTTON_CLS)?.toggleClass('is-active', active);
         this.child.toolbar?.toolbarLeftEl.querySelector<HTMLElement>('.' + TextboxTool.FONT_SIZE_CLS)?.toggle(active);
     }
 
-    private async waitForMode(mode: number) {
-        const start = Date.now();
-        while (Date.now() - start < MODE_SWITCH_TIMEOUT_MS) {
+    private waitForMode(mode: number) {
+        return waitFor(() => {
             const pdfViewer = this.pdfViewer;
-            if (pdfViewer?.annotationEditorMode === mode && this.layerOf(pdfViewer.currentPageNumber)) return true;
-            await new Promise((resolve) => window.setTimeout(resolve, 30));
-        }
-        return false;
+            return pdfViewer?.annotationEditorMode === mode && !!this.layerOf(pdfViewer.currentPageNumber);
+        });
     }
 
     private layerOf(pageNumber: number): EditorLayer | null {
@@ -427,6 +454,12 @@ export class TextboxTool extends PDFPlusComponent {
         const layer = this.layerOf(Number(pageEl.dataset.pageNumber));
         if (!layer) return;
 
+        // Editing an existing text box: a click elsewhere finishes it.
+        if (this.editing) {
+            this.deactivate();
+            return;
+        }
+
         // Finish the text box being typed into; the click still places a new one.
         this.commitActiveEditor();
 
@@ -439,6 +472,16 @@ export class TextboxTool extends PDFPlusComponent {
         editor.enableEditMode();
         editor.editorDiv?.focus();
     }
+}
+
+/** Wait until the condition holds, at most MODE_SWITCH_TIMEOUT_MS. */
+async function waitFor(condition: () => boolean) {
+    const start = Date.now();
+    while (Date.now() - start < MODE_SWITCH_TIMEOUT_MS) {
+        if (condition()) return true;
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+    }
+    return false;
 }
 
 /**
